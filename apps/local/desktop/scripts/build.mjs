@@ -1,8 +1,8 @@
 /**
- * Bundle the native entry, and the server starter it runs in a utility process, while keeping
- * Electron's runtime API external, as T3 Code does. `--release` builds what the release packages:
- * like the CLI's release bundles it defines EXECUTOR_DESKTOP_DEV as "0", which leaves the desktop's
- * development-only code out of the bundle.
+ * Bundle the native entry, the server starter it runs in a utility process and the window's
+ * preload, while keeping Electron's runtime API external, as T3 Code does. `--release` builds what
+ * the release packages: like the CLI's release bundles it defines EXECUTOR_DESKTOP_DEV as "0",
+ * which leaves the desktop's development-only code out of the bundle.
  */
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -13,6 +13,7 @@ export async function buildDesktop({ release = false } = {}) {
     entryPoints: {
       main: `${desktop}/src/main.ts`,
       starter: `${desktop}/src/starter.ts`,
+      preload: `${desktop}/src/preload.ts`,
     },
     outdir: `${desktop}/dist`,
     outExtension: { ".js": ".cjs" },

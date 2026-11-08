@@ -84,6 +84,7 @@
         "@executor-js/sdk": "workspace:*",
         "@executor-js/telemetry": "workspace:*",
         "@executor-js/utils": "workspace:*",
+        "@executor-js/v1-import": "workspace:*",
         "@sentry/cloudflare": "10.75.0",
         "@sentry/core": "10.75.0",
         "alchemy": "2.0.0-beta.80",
@@ -92,7 +93,6 @@
         "better-auth": "1.7.16",
         "effect": "4.0.1",
         "fumadb-effect": "workspace:*",
-        "js-yaml": "5.4.3",
         "kysely": "0.29.6",
         "pg": "8.16.3",
         "postal-mime": "4.0.2",
@@ -740,6 +740,17 @@
         "@effect/platform-node": "4.0.1",
         "effect": "4.0.1",
         "ipaddr.js": "2.5.0",
+      },
+    },
+    "packages/v1-import": {
+      "name": "@executor-js/v1-import",
+      "dependencies": {
+        "@executor-js/app-templates": "workspace:*",
+        "@executor-js/sdk": "workspace:*",
+        "@executor-js/utils": "workspace:*",
+        "apps": "workspace:*",
+        "effect": "4.0.1",
+        "js-yaml": "5.4.3",
       },
     },
     "playground/catalog": {
@@ -1449,6 +1460,8 @@
     "@executor-js/ui": ["@executor-js/ui@workspace:packages/ui"],
 
     "@executor-js/utils": ["@executor-js/utils@workspace:packages/utils"],
+
+    "@executor-js/v1-import": ["@executor-js/v1-import@workspace:packages/v1-import"],
 
     "@executor-playground/hosted": ["@executor-playground/hosted@workspace:playground/hosted"],
 

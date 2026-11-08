@@ -3,6 +3,7 @@
  * organization, started in batches by an operator, never by a user. A dry run reads v1 and v2 and
  * writes only its report; an import also writes v2.
  */
+import { V1StaleCategory } from "@executor-js/v1-import/contracts";
 import { Schema } from "effect";
 import { V1OrganizationId } from "./v1-import.ts";
 
@@ -66,41 +67,6 @@ export type V1OrgOutcome = typeof V1OrgOutcome.Type;
 export const V1RunMarker = Schema.Struct({ status: V1OrgOutcome, mode: V1ImportMode });
 
 const Count = Schema.Number;
-
-/**
- * Why an item v1 itself can no longer run is skipped rather than blocking its organization
- * (`notes/v1-import.md`, decisions 20 and 21). Every refusal either names one of these or blocks.
- *
- * - `local_server`: a local (stdio) MCP server, which v1 Cloud never ran.
- * - `no_base_url`: an API with no absolute server or base URL, so v1 had no host to call.
- * - `not_http`: a base URL, GraphQL endpoint or MCP address that is not http(s); for a tool, an
- *   OpenAPI operation whose server is not http(s), such as `wss://`, as v1 sent only HTTP requests.
- * - `undefined_server_variable`: an API whose server URL uses a variable no server defines, which
- *   v1 never resolved; for a tool, one operation's server.
- * - `unreadable_spec`: v1's stored specification does not read as one.
- * - `removed_tool`: a tool v1 last listed before the organization revised its integration, which
- *   the revised specification no longer has; v1 drops it when it next lists the tools.
- * - `missing_client`: the connection's OAuth client no longer exists in v1.
- * - `undeclared_method`: the connection's sign-in method is not one its integration declares.
- * - `incomplete_credential`: the connection's saved credential lacks a value its method sends.
- * - `missing_credential`: v1's Vault no longer holds the connection's saved credential.
- * - `unmatched_rule`: a tool policy that matches no tool v1 lists. It still moves, for tools the
- *   server may list again, and is reported in `unmatchedRules`.
- */
-export const V1StaleCategory = Schema.Literals([
-  "local_server",
-  "no_base_url",
-  "not_http",
-  "undefined_server_variable",
-  "unreadable_spec",
-  "removed_tool",
-  "missing_client",
-  "undeclared_method",
-  "incomplete_credential",
-  "missing_credential",
-  "unmatched_rule",
-]);
-export type V1StaleCategory = typeof V1StaleCategory.Type;
 
 /**
  * How a v1 organization moves into an existing v2 organization the operator listed

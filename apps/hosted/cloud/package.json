@@ -38,6 +38,7 @@
     "@executor-js/sdk": "workspace:*",
     "@executor-js/telemetry": "workspace:*",
     "@executor-js/utils": "workspace:*",
+    "@executor-js/v1-import": "workspace:*",
     "@sentry/cloudflare": "10.75.0",
     "@sentry/core": "10.75.0",
     "alchemy": "2.0.0-beta.80",
@@ -46,7 +47,6 @@
     "better-auth": "1.7.16",
     "effect": "4.0.1",
     "fumadb-effect": "workspace:*",
-    "js-yaml": "5.4.3",
     "kysely": "0.29.6",
     "pg": "8.16.3",
     "postal-mime": "4.0.2"

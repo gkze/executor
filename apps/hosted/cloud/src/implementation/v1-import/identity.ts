@@ -4,12 +4,12 @@
  * organization, and a membership per member. Each write records its import map row in the same
  * transaction, so a rerun finds it and never creates a second copy.
  */
+import { ItemFailed } from "@executor-js/v1-import/contracts";
 import { organizationHandle, organizationSlugMaxLength } from "@executor-js/hosted-server";
 import { Effect, Redacted, Schema } from "effect";
 import type { SqlClient } from "effect/sql";
 import { V1ImportUnavailable } from "../../contracts/v1-import.ts";
 import type { V1IntoMode } from "../../contracts/v1-import-run.ts";
-import { ItemFailed } from "./items.ts";
 import type { PlannedMember } from "./members.ts";
 import { sourceHash, type ImportStore } from "./store.ts";
 

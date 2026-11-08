@@ -17,6 +17,19 @@
  *
  * Without `apply` it reports what it would change and writes nothing.
  */
+import {
+  appAccounts,
+  approvalRules,
+  generate,
+  integrationLabel,
+  integrationPlan,
+  mcpNaming,
+  toolActions,
+  v1ToolDecisions,
+  v1ToolRules,
+  type IntegrationRow,
+  type ToolRow,
+} from "@executor-js/v1-import";
 import { CurrentUserId, HostedExecutor, organizationOwner } from "@executor-js/hosted-server";
 import { sharedAppCreation } from "@executor-js/hosted-server/resource-lifecycle";
 import {
@@ -29,19 +42,7 @@ import {
 import { Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/sql";
 import { V1ImportDatabase, V1ImportUnavailable } from "../../contracts/v1-import.ts";
-import type { IntegrationRow, ToolRow } from "./formats.ts";
-import {
-  appMethods,
-  approvalRules,
-  generate,
-  mcpNaming,
-  redundantFixed,
-  toolActions,
-  v1ToolDecisions,
-  v1ToolRules,
-  type ItemContext,
-} from "./items.ts";
-import { integrationLabel, integrationPlan } from "./plan.ts";
+import { cloudProduct, type ItemContext } from "./items.ts";
 import { V1ImportEnvironment, firstPartyClients } from "./run.ts";
 import { allSnapshotTables, type V1Snapshot, type V1Source } from "./source.ts";
 import { makeImportStore, type ImportStore } from "./store.ts";
@@ -580,7 +581,7 @@ export const movedOrganizationContext = (organization: string) =>
       target: { id: target.id as ItemContext["target"]["id"], slug: target.slug },
       owner,
       users: new Map(members.map((member) => [member.v1, member.v2])),
-      firstParty: firstPartyClients(executor, environment.v1FirstPartyClients).lookup,
+      product: cloudProduct(firstPartyClients(executor, environment.v1FirstPartyClients).lookup),
     };
     return { v2Organization: recorded.v2_id, context };
   });
@@ -611,17 +612,12 @@ export const repairOrganization = (organization: string, apply: boolean) =>
       store,
     )) {
       const base = { integration: integrationLabel(integration), app, always, unlisted };
-      const plan = integrationPlan(integration);
+      const plan = integrationPlan(context.product, integration);
       if (!plan.ok) {
         apps.push({ ...base, decision: "failed", files: [], reason: plan.reason });
         continue;
       }
-      const planned = appMethods(
-        snapshot,
-        context.firstParty,
-        integration,
-        yield* redundantFixed(context, integration),
-      );
+      const planned = yield* appAccounts(context, integration);
       const scoped = (files: Parameters<typeof scopeGeneratedPackage>[0]) =>
         scopeGeneratedPackage(files, target.slug, integrationLabel(integration));
       const generated = yield* Effect.all({

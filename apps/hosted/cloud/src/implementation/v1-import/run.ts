@@ -13,6 +13,35 @@
  * and the step's tool listings, released with the step.
  */
 import {
+  appNames,
+  artifactNaming,
+  connectionAppName,
+  connectionAppNaming,
+  connectionPlan,
+  connectionPlans,
+  decodeToolkit,
+  firstPartyClientPrefix,
+  integrationLabel,
+  integrationNaming,
+  integrationPlan,
+  matchPattern,
+  needsNoAccount,
+  policyPlan,
+  readSecretCompared,
+  refused,
+  type AppAccountRequirements,
+  type AppNaming,
+  type AppScope,
+  type ConnectionRow,
+  type DroppedFixed,
+  type FirstPartyClients,
+  type IntegrationRow,
+  type RuleCounts,
+  type StaleTool,
+  type V1ImportProduct,
+} from "@executor-js/v1-import";
+import { ItemFailed, type V1StaleCategory } from "@executor-js/v1-import/contracts";
+import {
   recordSecurityAudit,
   HostedExecutor,
   organizationOwner,
@@ -43,7 +72,6 @@ import { V1ImportDatabase, V1ImportUnavailable } from "../../contracts/v1-import
 import {
   V1OrgReport,
   type V1ImportVerification,
-  type V1StaleCategory,
   v1ImportInFlightKey,
   v1ImportReportKey,
   v1ImportRunPrefix,
@@ -51,13 +79,6 @@ import {
   type V1IntoMode,
   type V1OrgOutcome,
 } from "../../contracts/v1-import-run.ts";
-import {
-  decodeToolkit,
-  firstPartyClientPrefix,
-  matchPattern,
-  type ConnectionRow,
-  type IntegrationRow,
-} from "./formats.ts";
 import {
   importInto,
   importMembership,
@@ -77,17 +98,13 @@ import {
   type UserMatch,
 } from "./identity.ts";
 import {
-  ItemFailed,
-  appNames,
   artifactMapping,
-  artifactNaming,
   checkAccount,
   checkFixedAccount,
   checkIntegration,
-  connectionAppName,
-  connectionAppNaming,
+  cloudProduct,
+  cloudWording,
   connectionAppOf,
-  connectionPlans,
   connectionTarget,
   importAccount,
   importArtifact,
@@ -96,27 +113,16 @@ import {
   importFixedAccount,
   importIntegration,
   importToolkit,
-  integrationNaming,
   linkConnectionAccount,
   mapLookup,
-  namesTaken,
-  needsNoAccount,
-  readSecretCompared,
   refreshCopiedGrant,
-  refused,
   toolkitCopyKey,
   toolkitMembers,
   updateCopiedAccount,
   toolkitPlanning,
   toolkitPolicy,
-  type AppAccountRequirements,
-  type AppNaming,
-  type AppScope,
-  type DroppedFixed,
   type ImportedLookup,
   type ItemContext,
-  type RuleCounts,
-  type StaleTool,
   type ToolkitCopyRecord,
 } from "./items.ts";
 import {
@@ -127,13 +133,6 @@ import {
   type SkippedMember,
   type V1Billing,
 } from "./members.ts";
-import {
-  connectionPlan,
-  integrationLabel,
-  integrationPlan,
-  policyPlan,
-  type FirstPartyClients,
-} from "./plan.ts";
 import {
   V1ImportUnreadable,
   allSnapshotTables,
@@ -322,7 +321,7 @@ const connectionRefusal = (
     firstParty === undefined &&
     error instanceof ItemFailed &&
     error.outage === undefined &&
-    error.vault !== "unavailable" &&
+    error.credential !== "unavailable" &&
     error.reason !== integrationNotImported
     ? { status: "skipped", reason: decided.reason, reconnect: true }
     : decided;
@@ -1118,13 +1117,13 @@ const policyMatches = (
  * own app, and a connection's account when it can be imported. The ids name nothing in v2.
  */
 const plannedLookup = (
+  product: V1ImportProduct,
   snapshot: Pick<V1Snapshot, "integrations" | "clients">,
-  firstParty: FirstPartyClients,
   split: ReadonlySet<string>,
 ): ImportedLookup => ({
   app: (integration) =>
     Effect.succeed(
-      !integrationPlan(integration).ok
+      !integrationPlan(product, integration).ok
         ? undefined
         : split.has(integration.row_id)
           ? { kind: "split" }
@@ -1135,13 +1134,13 @@ const plannedLookup = (
       snapshot.integrations.some(
         (integration) =>
           integration.slug === connection.integration && split.has(integration.row_id),
-      ) && connectionPlan(snapshot, firstParty, connection).ok
+      ) && connectionPlan(product, snapshot, connection).ok
         ? `app_planned_${connection.row_id}`
         : undefined,
     ),
   connection: (connection) =>
     Effect.succeed(
-      connectionPlan(snapshot, firstParty, connection).ok
+      connectionPlan(product, snapshot, connection).ok
         ? {
             target: connectionTarget(
               connection,
@@ -1167,14 +1166,14 @@ const dryContext = <T extends V1SnapshotTable>(
       source,
       snapshot,
       executor,
-      firstParty: clients.lookup,
+      product: cloudProduct(clients.lookup),
       mismatchOf: clients.mismatchOf,
     };
   });
 
 const dryIntegration = (assessment: Assessment, organization: string, id: string) =>
   Effect.gen(function* () {
-    const { source, snapshot, executor, firstParty } = yield* dryContext(
+    const { source, snapshot, executor, product } = yield* dryContext(
       assessment,
       organization,
       allSnapshotTables,
@@ -1194,7 +1193,7 @@ const dryIntegration = (assessment: Assessment, organization: string, id: string
       executor,
       snapshot,
       source,
-      firstParty,
+      product,
       owner: OwnerId.make(`v1:${organization}`),
       slug: assessment.slug?.v2 ?? snapshot.organization.slug,
     };
@@ -1228,7 +1227,7 @@ const dryIntegration = (assessment: Assessment, organization: string, id: string
         // As an import's `withFixedAccount`: a refused fixed account fails the integration, whose
         // app its connections still get.
         return checkFixedAccount(
-          { executor, snapshot, source, firstParty },
+          { executor, snapshot, source, product },
           row,
           checked.accounts,
         ).pipe(
@@ -1264,7 +1263,7 @@ const dryIntegration = (assessment: Assessment, organization: string, id: string
  */
 const dryConnectionApps = (checking: Parameters<typeof checkIntegration>[0], row: IntegrationRow) =>
   Effect.forEach(
-    connectionPlans(checking.snapshot, checking.firstParty, row),
+    connectionPlans(checking.product, checking.snapshot, row),
     ({ row: connection }) => {
       const app = {
         connection: connection.row_id,
@@ -1321,7 +1320,7 @@ const namedApps = (outcomes: readonly Outcome[]): readonly Outcome[] => {
         if (app.status !== "planned" || app.naming === undefined) return app;
         const name = take(app.naming);
         return name === undefined
-          ? { ...app, status: "failed", reason: namesTaken }
+          ? { ...app, status: "failed", reason: cloudWording.namesTaken }
           : { ...app, name };
       });
       return apps.some((app, index) => app.status !== outcome.apps?.[index]?.status)
@@ -1330,7 +1329,7 @@ const namedApps = (outcomes: readonly Outcome[]): readonly Outcome[] => {
     }
     if (outcome.status !== "planned" || outcome.naming === undefined) return outcome;
     return take(outcome.naming) === undefined
-      ? { ...outcome, status: "failed", reason: namesTaken }
+      ? { ...outcome, status: "failed", reason: cloudWording.namesTaken }
       : outcome;
   });
 };
@@ -1381,7 +1380,7 @@ const dryConnections = (
   apps: ReturnType<typeof builtApps>,
 ) =>
   Effect.gen(function* () {
-    const { source, snapshot, executor, firstParty, mismatchOf } = yield* dryContext(
+    const { source, snapshot, executor, product, mismatchOf } = yield* dryContext(
       assessment,
       organization,
       ["integrations", "connections", "clients"],
@@ -1405,7 +1404,7 @@ const dryConnections = (
         const base = { kind: "connection", id, label: row.name, context } as const;
         const skipped = staleIntegrationOf(snapshot, stale, row);
         if (skipped !== undefined) return skippedWith(base, skipped);
-        const plan = connectionPlan(snapshot, firstParty, row);
+        const plan = connectionPlan(product, snapshot, row);
         if (!plan.ok)
           return plan.stale === null
             ? ({
@@ -1427,11 +1426,11 @@ const dryConnections = (
           return { ...base, status: "planned" } satisfies Outcome;
         const differing: Array<{ readonly members: number; readonly values: number }> = [];
         const refusedBy = yield* checkAccount(
-          { executor, source, snapshot, firstParty, owner: OwnerId.make(`v1:${organization}`) },
+          { executor, source, snapshot, product, owner: OwnerId.make(`v1:${organization}`) },
           plan.value,
           accounts,
           (item) =>
-            readSecretCompared({ source, snapshot }, row, item).pipe(
+            readSecretCompared({ product, source, snapshot }, row, item).pipe(
               Effect.map((read) => {
                 if (read.values > 1) differing.push({ members: read.holders, values: read.values });
                 return read.value;
@@ -1446,8 +1445,8 @@ const dryConnections = (
           return {
             ...base,
             ...connectionRefusal(refusedBy, undefined),
-            ...(refusedBy instanceof ItemFailed && refusedBy.vault !== undefined
-              ? { vaultFailed: refusedBy.vault }
+            ...(refusedBy instanceof ItemFailed && refusedBy.credential !== undefined
+              ? { vaultFailed: refusedBy.credential }
               : {}),
           } satisfies Outcome;
         return {
@@ -1505,16 +1504,13 @@ const dryPolicies = (
 
 const dryToolkits = (assessment: Assessment, organization: string, split: ReadonlySet<string>) =>
   Effect.gen(function* () {
-    const { source, snapshot, firstParty } = yield* dryContext(
+    const { source, snapshot, product } = yield* dryContext(
       assessment,
       organization,
       allSnapshotTables,
     );
     // Every copy of every toolkit is planned from the same apps, tools and accounts.
-    const planning = toolkitPlanning(
-      { snapshot, source },
-      plannedLookup(snapshot, firstParty, split),
-    );
+    const planning = toolkitPlanning({ snapshot, source }, plannedLookup(product, snapshot, split));
     // Only the toolkits the assessment plans, as an import moves: none when v1's data stays in v1.
     const planned = new Set(assessment.items.toolkits);
     const rows = snapshot.toolkits.filter((row) => planned.has(row.row_id));
@@ -1559,12 +1555,12 @@ const artifactRows = (
 
 const dryArtifacts = (assessment: Assessment, organization: string, split: ReadonlySet<string>) =>
   Effect.gen(function* () {
-    const { source, snapshot, firstParty } = yield* dryContext(assessment, organization, [
+    const { source, snapshot, product } = yield* dryContext(assessment, organization, [
       "integrations",
       "connections",
       "clients",
     ]);
-    const lookup = plannedLookup(snapshot, firstParty, split);
+    const lookup = plannedLookup(product, snapshot, split);
     const ids = assessment.items.artifacts;
     // In the order an import saves them, so the dry run names them as it would (`namedApps`).
     const rows = (yield* artifactRows(source, snapshot, ids)).toSorted(
@@ -1721,7 +1717,7 @@ const importContext = (params: V1ImportParams, assessment: Assessment, identity:
       target: { id: identity.target.id as OrganizationId, slug: identity.target.slug },
       owner: identity.owner,
       users: new Map(identity.users),
-      firstParty: clients.lookup,
+      product: cloudProduct(clients.lookup),
     } satisfies ItemContext;
     return { ...context, mismatchOf: clients.mismatchOf };
   });
@@ -1776,15 +1772,15 @@ const failedItem =
         ...(base.firstParty === undefined || decided.stale !== undefined
           ? {}
           : { firstParty: base.firstParty }),
-        ...(error instanceof ItemFailed && error.vault !== undefined
-          ? { vaultFailed: error.vault }
+        ...(error instanceof ItemFailed && error.credential !== undefined
+          ? { vaultFailed: error.credential }
           : {}),
       };
     });
 
 const integrationHash = (context: ItemContext, id: string) =>
   Effect.gen(function* () {
-    const { snapshot, firstParty } = context;
+    const { snapshot, product } = context;
     const row = snapshot.integrations.find((candidate) => candidate.row_id === id);
     if (row === undefined) return undefined;
     // Policies, toolkits' policies, members and connections' sign-in shape the generated source.
@@ -1803,7 +1799,7 @@ const integrationHash = (context: ItemContext, id: string) =>
           connection.oauth_client,
           ...(firstPartyName(connection) === undefined
             ? []
-            : [firstParty(firstPartyName(connection) ?? "") !== undefined]),
+            : [product.firstParty(firstPartyName(connection) ?? "") !== undefined]),
         ]),
     });
     return { row, hash };
@@ -1895,7 +1891,7 @@ const importConnectionApps = (
   Effect.gen(function* () {
     const apps: ConnectionAppOutcome[] = [];
     let left: Pick<Outcome, "traced" | "staleTools" | "droppedCredentials"> = {};
-    for (const { row: connection } of connectionPlans(context.snapshot, context.firstParty, row)) {
+    for (const { row: connection } of connectionPlans(context.product, context.snapshot, row)) {
       const key = connection.row_id;
       const appHash = yield* sourceHash([hash, key]);
       const app = {
@@ -1992,7 +1988,7 @@ const importConnectionItem = (
   tookV1: ReadonlySet<string>,
 ) =>
   Effect.gen(function* () {
-    const { snapshot, store, executor, firstParty } = context;
+    const { snapshot, store, executor, product } = context;
     const row = snapshot.connections.find((candidate) => candidate.row_id === id);
     if (row === undefined)
       return {
@@ -2051,7 +2047,7 @@ const importConnectionItem = (
       });
     }
     return yield* Effect.gen(function* () {
-      const plan = connectionPlan(snapshot, firstParty, row);
+      const plan = connectionPlan(product, snapshot, row);
       if (!plan.ok) return yield* refused(plan);
       // Its integration's one app, or its own (decision 33).
       const found = yield* connectionAppOf(store, snapshot, row);

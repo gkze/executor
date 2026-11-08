@@ -6,7 +6,7 @@
  */
 import { Effect, Option, Schema } from "effect";
 import { Base64Url } from "effect/encoding";
-import type { V1StaleCategory } from "../../contracts/v1-import-run.ts";
+import type { V1StaleCategory } from "../contracts/index.ts";
 
 const Owner = Schema.Literals(["org", "user"]);
 export type V1Owner = typeof Owner.Type;
@@ -257,6 +257,26 @@ export const OpenApiOperationRow = Schema.Struct({
 });
 export type OpenApiOperationRow = typeof OpenApiOperationRow.Type;
 
+/**
+ * The v1 rows an import plans from: one tenant's org rows and the imported subjects' own. Each
+ * product reads them from its v1 (Cloud's Postgres, a local v1's SQLite file); what only the
+ * product knows comes from its `V1ImportProduct`.
+ */
+export interface V1Rows {
+  readonly tenant: string;
+  /** The subjects whose personal rows are read: the people the import moves. */
+  readonly subjects: readonly [string, ...string[]];
+  /** Whether the workspace has more than one active member, which decides how rules move. */
+  readonly multiMember: boolean;
+  readonly integrations: readonly IntegrationRow[];
+  readonly connections: readonly ConnectionRow[];
+  readonly clients: readonly OAuthClientRow[];
+  readonly policies: readonly PolicyRow[];
+  readonly toolkits: readonly ToolkitRow[];
+  /** Toolkits' connection and policy rules, in the same owner partitions as their toolkits. */
+  readonly toolkitRules: readonly ToolkitRuleRow[];
+}
+
 // ---------------------------------------------------------------------------------------------
 // Plugin configuration (`integration.config`) per `plugin_id`.
 
@@ -319,6 +339,19 @@ export const McpRemoteConfig = Schema.Struct({
 export type McpRemoteConfig = typeof McpRemoteConfig.Type;
 const McpStdioConfig = Schema.Struct({ transport: Schema.Literal("stdio") });
 export const McpConfig = Schema.Union([McpRemoteConfig, McpStdioConfig]);
+
+/** What v1 ran for a local (stdio) MCP server, beyond its transport. */
+const McpStdioCommand = Schema.Struct({
+  transport: Schema.Literal("stdio"),
+  command: Schema.optional(Schema.String),
+  args: Schema.optional(Schema.Array(Schema.String)),
+  /** Non-secret environment, or, before v1 declared `stdio_env`, the server's credentials. */
+  env: Schema.optional(StringMap),
+  cwd: Schema.optional(Schema.String),
+  /** v1's adapter for `codex app-server`, which speaks its own protocol rather than MCP. */
+  appServer: Schema.optional(Schema.Unknown),
+  authenticationTemplate: Schema.optional(Schema.Array(Schema.Struct({ kind: Schema.String }))),
+});
 
 export const OpenApiConfig = Schema.Struct({
   specHash: Schema.optional(Schema.String),
@@ -385,6 +418,14 @@ export type V1Integration =
       readonly healthCheck: boolean;
     }
   | {
+      /**
+       * A local (stdio) MCP server, which moves only to a product that runs its command
+       * (`V1ImportProduct.localServers`).
+       */
+      readonly plugin: "stdio";
+      readonly server: V1StdioServer;
+    }
+  | {
       readonly plugin: "unsupported";
       readonly reason: string;
       /** Why v1 cannot run it either, which skips it; null when it blocks the organization. */
@@ -435,10 +476,7 @@ export const decodeIntegration = (row: IntegrationRow): V1Integration => {
       const decoded = Schema.decodeUnknownOption(McpConfig)(config);
       if (Option.isNone(decoded)) return unsupported("Its MCP configuration could not be read.");
       if (decoded.value.transport === "stdio")
-        return unsupported(
-          "Local (stdio) MCP servers do not run in Executor Cloud.",
-          "local_server",
-        );
+        return { plugin: "stdio", server: decodeStdioServer(config) };
       const remote = decoded.value;
       if (httpUrl(remote.endpoint) === undefined)
         return unsupported("Its MCP server address is not an http(s) URL.", "not_http");
@@ -528,8 +566,52 @@ export const decodeIntegration = (row: IntegrationRow): V1Integration => {
       };
     }
     default:
-      return unsupported("Executor v2 has no equivalent of this v1 plugin.");
+      return unsupported("The importer has no app for its v1 plugin.");
   }
+};
+
+/**
+ * A local (stdio) MCP server as v1 ran it: its command, arguments, environment and working
+ * directory, or why no product can run it as v1 did.
+ */
+export type V1StdioServer =
+  | {
+      readonly ok: true;
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly env: Readonly<Record<string, string>>;
+      readonly cwd: string | undefined;
+    }
+  | { readonly ok: false; readonly reason: string };
+
+/** A local (stdio) server's command from its MCP configuration. */
+const decodeStdioServer = (config: unknown): V1StdioServer => {
+  const decoded = Schema.decodeUnknownOption(McpStdioCommand)(config);
+  if (Option.isNone(decoded))
+    return { ok: false, reason: "Its local (stdio) MCP server configuration could not be read." };
+  const server = decoded.value;
+  if (server.appServer !== undefined)
+    return {
+      ok: false,
+      reason:
+        "It runs through v1's Codex app-server adapter, which speaks its own protocol rather than MCP.",
+    };
+  const env = server.env ?? {};
+  // Before v1 declared sign-in methods for a command, it kept the server's credentials in `env`.
+  const credentials =
+    server.authenticationTemplate === undefined
+      ? Object.keys(env).length > 0
+      : server.authenticationTemplate.some((method) => method.kind === "stdio_env");
+  if (credentials)
+    return {
+      ok: false,
+      reason:
+        "Its command takes credentials in environment variables, which the import does not move yet.",
+    };
+  const command = server.command?.trim() ?? "";
+  if (command === "") return { ok: false, reason: "It has no command." };
+  const cwd = server.cwd?.trim() ?? "";
+  return { ok: true, command, args: server.args ?? [], env, cwd: cwd === "" ? undefined : cwd };
 };
 
 /** The variables an API-key method reads from a connection's `item_ids`, in placement order. */

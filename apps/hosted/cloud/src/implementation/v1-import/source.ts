@@ -14,14 +14,15 @@ import {
   Schedule,
   Schema,
   Scope,
-  Stream,
 } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { SqlClient } from "effect/sql";
 import { AutumnClient, type AutumnOptions } from "../../contracts/autumn.ts";
 import { V1ImportUnavailable } from "../../contracts/v1-import.ts";
+import { V1CredentialsUnavailable } from "@executor-js/v1-import/contracts";
 import { autumnLive, autumnReads } from "../autumn-client.ts";
 import {
+  fetchSpecification,
   ArtifactRow,
   ArtifactSummary,
   ConnectionRow,
@@ -35,7 +36,23 @@ import {
   ToolRow,
   blobKey,
   vaultObjectName,
-} from "./formats.ts";
+  type V1Reader,
+  type V1Rows,
+} from "@executor-js/v1-import";
+
+/**
+ * v1 answered, but what it returned does not have the shape the import reads: a row of `read`
+ * (a table or a WorkOS listing) failed to decode. Another attempt reads the same, so it is not
+ * retried; the item or organization reports it. It names the read only, never the row's data.
+ */
+export class V1ImportUnreadable extends Schema.TaggedError<V1ImportUnreadable>()(
+  "V1ImportUnreadable",
+  { read: Schema.String },
+) {}
+
+/** The report's reason for a read that did not decode. */
+export const unreadableReason = (error: V1ImportUnreadable) =>
+  `v1's ${error.read} could not be read: they do not have the shape the import expects.`;
 
 /** Where v1 kept plugin blobs: R2 in production, or its Postgres `blob` table without R2. */
 export interface V1Blobs {
@@ -120,22 +137,10 @@ export type V1User = typeof User.Type;
 
 /**
  * Everything an import plan reads about one v1 organization: org rows and the personal rows of
- * the members it imports (`subjects`). Former members' rows are never read.
+ * the members it imports (`subjects`, WorkOS user ids). Former members' rows are never read.
  */
-export interface V1Snapshot {
-  readonly tenant: string;
-  /** The WorkOS user ids whose personal rows are read: the members the import moves. */
-  readonly subjects: readonly [string, ...string[]];
-  /** Whether the workspace has more than one active member, which decides how rules move. */
-  readonly multiMember: boolean;
+export interface V1Snapshot extends V1Rows {
   readonly organization: { readonly name: string; readonly slug: string };
-  readonly integrations: readonly IntegrationRow[];
-  readonly connections: readonly ConnectionRow[];
-  readonly clients: readonly OAuthClientRow[];
-  readonly policies: readonly PolicyRow[];
-  readonly toolkits: readonly ToolkitRow[];
-  /** Toolkits' connection and policy rules, in the same owner partitions as their toolkits. */
-  readonly toolkitRules: readonly ToolkitRuleRow[];
 }
 
 /** The organization's tables a snapshot can read. A step reads only the ones it uses. */
@@ -160,29 +165,6 @@ export type V1SnapshotOf<T extends V1SnapshotTable> = Pick<
   V1Snapshot,
   "tenant" | "subjects" | "multiMember" | "organization" | T
 >;
-
-/**
- * v1's Vault kept failing a read (an outage or rate limit) after a few short retries. The secret
- * may exist; the item that needed it reports the failure instead of retrying its whole step.
- */
-export class V1VaultUnavailable extends Schema.TaggedError<V1VaultUnavailable>()(
-  "V1VaultUnavailable",
-  {},
-) {}
-
-/**
- * v1 answered, but what it returned does not have the shape the import reads: a row of `read`
- * (a table or a WorkOS listing) failed to decode. Another attempt reads the same, so it is not
- * retried; the item or organization reports it. It names the read only, never the row's data.
- */
-export class V1ImportUnreadable extends Schema.TaggedError<V1ImportUnreadable>()(
-  "V1ImportUnreadable",
-  { read: Schema.String },
-) {}
-
-/** The report's reason for a read that did not decode. */
-export const unreadableReason = (error: V1ImportUnreadable) =>
-  `v1's ${error.read} could not be read: they do not have the shape the import expects.`;
 
 /** Decode `read`'s rows, failing with `V1ImportUnreadable` when they do not decode. */
 const decodeRows =
@@ -429,67 +411,6 @@ const readOnly = (request: HttpClientRequest.HttpClientRequest) =>
     ? Effect.succeed(request)
     : Effect.die(new Error(`The v1 import reads v1 only; it refused a ${request.method} request.`));
 
-/** The largest specification the import fetches, as large as an OpenAPI app's router downloads. */
-const maxSpecificationBytes = 40_000_000;
-
-/**
- * Why the document at a specification URL could not be fetched. It never names the URL, which can
- * carry a key in its user, host, port, path or query.
- */
-export class SpecificationUnavailable extends Schema.TaggedError<SpecificationUnavailable>()(
-  "SpecificationUnavailable",
-  { reason: Schema.String },
-) {}
-
-/**
- * The document at the URL v1 stored as an integration's specification, fetched once, as v1 fetched
- * it when the integration was added: a GET without the integration's credentials, within 60
- * seconds, of at most `maxSpecificationBytes`. Redirects are followed, as v1 followed them.
- */
-export const fetchSpecification = (http: HttpClient.HttpClient, url: string) =>
-  Effect.gen(function* () {
-    const unavailable = (why: string) =>
-      new SpecificationUnavailable({
-        reason: `v1 stored its specification as a URL, and ${why}.`,
-      });
-    const response = yield* http
-      .execute(
-        HttpClientRequest.get(url).pipe(
-          HttpClientRequest.setHeader(
-            "accept",
-            "application/json, application/yaml, text/yaml, */*",
-          ),
-        ),
-      )
-      .pipe(Effect.mapError(() => unavailable("fetching it failed")));
-    if (response.status < 200 || response.status >= 300)
-      return yield* unavailable(`fetching it answered HTTP ${response.status}`);
-    const chunks = yield* response.stream.pipe(
-      Stream.mapError(() => unavailable("reading its document failed")),
-      Stream.limitBytes(maxSpecificationBytes, () =>
-        Stream.fail(unavailable(`its document is larger than ${maxSpecificationBytes} bytes`)),
-      ),
-      Stream.runCollect,
-    );
-    const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return bytes;
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: "60 seconds",
-      orElse: () =>
-        Effect.fail(
-          new SpecificationUnavailable({
-            reason: "v1 stored its specification as a URL, and fetching it took over 60 seconds.",
-          }),
-        ),
-    }),
-  );
-
 /**
  * v1's state for one step: WorkOS, Vault, Postgres, blobs and billing. The scope is the step's: it
  * holds the one read-only Postgres client every read of the step shares, opened on the first, and
@@ -600,6 +521,50 @@ export const makeV1Source = (settings: V1SourceSettings) =>
       Effect.provide(autumnLive(settings.billing, autumnReads.patient)),
       Effect.provideService(HttpClient.HttpClient, http),
     );
+    /** What app generation and account decisions read from v1 beyond its rows. */
+    const reader = {
+      tools,
+      openApiOperations: (tenant: string, integration: string) =>
+        database(readOpenApiOperations(tenant, integration)).pipe(unavailable("operations")),
+      openApiBinding: (tenant: string, integration: string, tool: string) =>
+        database(readOpenApiBinding(tenant, integration, tool)).pipe(unavailable("binding")),
+      blob: (tenant: string, plugin: string, key: string) =>
+        blobs.get(blobKey(tenant, plugin, key)),
+      blobMissing: blobs.missing,
+      specification: (url: string) => fetchSpecification(http, url),
+      /**
+       * A secret value from v1's Vault. Undefined when the object is missing (WorkOS answers 404,
+       * or 400 for a name it rejects). An outage or rate limit (5xx, 429 or no answer) is retried
+       * a few times, then fails with `V1CredentialsUnavailable`. The value never enters errors or logs.
+       */
+      secret: (input: {
+        readonly tenant: string;
+        readonly subject: string;
+        readonly itemId: string;
+      }) =>
+        Effect.gen(function* () {
+          const name = yield* vaultObjectName(input).pipe(unavailable("vault"));
+          const response = yield* workos
+            .execute(HttpClientRequest.get(`/vault/v1/kv/name/${encodeURIComponent(name)}`))
+            .pipe(
+              Effect.flatMap((answered) =>
+                answered.status >= 500 || answered.status === 429
+                  ? Effect.fail(new V1CredentialsUnavailable())
+                  : Effect.succeed(answered),
+              ),
+              Effect.catchTag("HttpClientError", () => Effect.fail(new V1CredentialsUnavailable())),
+              Effect.retry(vaultRetry),
+              Effect.tapError(() => Effect.logWarning("v1 import read failed: vault")),
+            );
+          if (response.status === 404 || response.status === 400) return undefined;
+          if (response.status !== 200) return yield* new V1ImportUnavailable();
+          const object = yield* response.json.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(VaultObject)),
+            unavailable("vault"),
+          );
+          return object.value;
+        }),
+    } satisfies V1Reader<V1ImportUnavailable | V1ImportUnreadable>;
     return {
       /**
        * The organization's active, pending and inactive memberships, oldest first, from every page.
@@ -724,47 +689,7 @@ export const makeV1Source = (settings: V1SourceSettings) =>
         subjects: readonly [string, ...string[]],
         rows: readonly [string, ...string[]],
       ) => database(readArtifacts(tenant, subjects, rows)).pipe(unavailable("artifacts")),
-      tools,
-      openApiOperations: (tenant: string, integration: string) =>
-        database(readOpenApiOperations(tenant, integration)).pipe(unavailable("operations")),
-      openApiBinding: (tenant: string, integration: string, tool: string) =>
-        database(readOpenApiBinding(tenant, integration, tool)).pipe(unavailable("binding")),
-      blob: (tenant: string, plugin: string, key: string) =>
-        blobs.get(blobKey(tenant, plugin, key)),
-      blobMissing: blobs.missing,
-      specification: (url: string) => fetchSpecification(http, url),
-      /**
-       * A secret value from v1's Vault. Undefined when the object is missing (WorkOS answers 404,
-       * or 400 for a name it rejects). An outage or rate limit (5xx, 429 or no answer) is retried
-       * a few times, then fails with `V1VaultUnavailable`. The value never enters errors or logs.
-       */
-      secret: (input: {
-        readonly tenant: string;
-        readonly subject: string;
-        readonly itemId: string;
-      }) =>
-        Effect.gen(function* () {
-          const name = yield* vaultObjectName(input).pipe(unavailable("vault"));
-          const response = yield* workos
-            .execute(HttpClientRequest.get(`/vault/v1/kv/name/${encodeURIComponent(name)}`))
-            .pipe(
-              Effect.flatMap((answered) =>
-                answered.status >= 500 || answered.status === 429
-                  ? Effect.fail(new V1VaultUnavailable())
-                  : Effect.succeed(answered),
-              ),
-              Effect.catchTag("HttpClientError", () => Effect.fail(new V1VaultUnavailable())),
-              Effect.retry(vaultRetry),
-              Effect.tapError(() => Effect.logWarning("v1 import read failed: vault")),
-            );
-          if (response.status === 404 || response.status === 400) return undefined;
-          if (response.status !== 200) return yield* new V1ImportUnavailable();
-          const object = yield* response.json.pipe(
-            Effect.flatMap(Schema.decodeUnknownEffect(VaultObject)),
-            unavailable("vault"),
-          );
-          return object.value;
-        }),
+      ...reader,
     };
   });
 

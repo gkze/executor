@@ -7,7 +7,7 @@
 import { Option, Result, Schema } from "effect";
 import { JSON_SCHEMA, YAMLException, load as loadYaml } from "js-yaml";
 import { isLoopbackHostname } from "@executor-js/utils/url-policy";
-import type { V1StaleCategory } from "../../contracts/v1-import-run.ts";
+import type { V1StaleCategory } from "../contracts/index.ts";
 import type { OpenApiConfig, OpenApiOperationRow } from "./formats.ts";
 import { Entries, mapEntries, noEntries, parserReason } from "./stored-document.ts";
 

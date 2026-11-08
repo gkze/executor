@@ -26,10 +26,12 @@ import {
   type PolicyRow,
   type V1AuthMethod,
   type V1Integration,
+  type V1Rows,
+  type V1StdioServer,
   type V1Toolkit,
 } from "./formats.ts";
-import type { V1StaleCategory } from "../../contracts/v1-import-run.ts";
-import type { V1Snapshot } from "./source.ts";
+import type { V1StaleCategory } from "../contracts/index.ts";
+import type { V1ImportProduct } from "./product.ts";
 
 export type Supported<A> = { readonly ok: true; readonly value: A };
 /**
@@ -41,6 +43,13 @@ export type Unsupported = {
   readonly ok: false;
   readonly reason: string;
   readonly stale: V1StaleCategory | null;
+  /**
+   * The store a connection's credential is kept in, when it is not the product's
+   * (`V1ImportProduct.credentialProvider`). Such a refusal is `missing_credential`: the product's
+   * v1 could not read it either. A product whose v1 had other stores moves the connection without
+   * its credential instead.
+   */
+  readonly elsewhere?: string;
 };
 const supported = <A>(value: A): Supported<A> => ({ ok: true, value });
 const unsupported = (reason: string): Unsupported => ({ ok: false, reason, stale: null });
@@ -54,7 +63,17 @@ const mapSupported = <A, B>(
   f: (value: A) => B,
 ): Supported<B> | Unsupported => (result.ok ? supported(f(result.value)) : result);
 
-export type ImportableIntegration = Exclude<V1Integration, { readonly plugin: "unsupported" }>;
+/** An integration the product can move: a local (stdio) one only with a command it runs. */
+export type ImportableIntegration =
+  | Exclude<V1Integration, { readonly plugin: "unsupported" | "stdio" }>
+  | {
+      readonly plugin: "stdio";
+      readonly server: Extract<V1StdioServer, { readonly ok: true }>;
+      /** A local server takes no sign-in: v1 sent its connections nothing (`none`). */
+      readonly methods: ReadonlyMap<string, V1AuthMethod>;
+      /** The product's source for the app of a server it runs. */
+      readonly source: Extract<V1ImportProduct["localServers"], { readonly runs: true }>["source"];
+    };
 
 /** How one connection becomes a v2 account, once its integration is an app. */
 export type ConnectionAccess =
@@ -106,12 +125,6 @@ export type ConnectionAccess =
       readonly renewal: { readonly scopes: readonly string[] };
     };
 
-/**
- * The operator's OAuth client v2 offers under one of v1's first-party names (`google` for
- * `first-party:google`), or undefined when it offers none: the client's credentials are not set.
- */
-export type FirstPartyClients = (name: string) => FirstPartyOAuthClientDescription | undefined;
-
 export interface ConnectionPlan {
   readonly row: ConnectionRow;
   readonly integration: IntegrationRow;
@@ -130,6 +143,54 @@ const firstPartyNames: Record<string, string> = {
 /** The provider of one of Executor's own OAuth apps, as people know it: `google` is Google. */
 export const firstPartyName = (name: string) =>
   firstPartyNames[name] ?? `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+
+/** Text that starts a sentence, such as the product's name ("this Executor"). */
+const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
+/**
+ * Why a connection that signed in through one of Executor's own OAuth apps (`name`, as
+ * `firstPartyName` gives it) cannot move to the product's client of the same name, whether the
+ * rows (`connectionPlan`) or the host's check of the copied grant (`grantRefusals`) found it:
+ *
+ * - `unavailable`: the product offers no such client.
+ * - `granted_scopes`: the connection was granted scopes the client does not allow.
+ * - `requested_scopes`: the integration asks for scopes the client does not allow.
+ * - `hosts`: the client sends its tokens only to `sendsTo`, and the integration also calls
+ *   `unreachable`, or calls none of them (`all`).
+ * - `resource`: the integration does not sign in where the client does.
+ */
+export const firstPartyRefusal = (
+  wording: Pick<V1ImportProduct["wording"], "product" | "reconnect">,
+  name: string,
+  refusal:
+    | { readonly kind: "unavailable" | "granted_scopes" | "requested_scopes" | "resource" }
+    | {
+        readonly kind: "hosts";
+        readonly sendsTo: readonly string[];
+        readonly unreachable: readonly string[] | "all";
+      },
+) => {
+  const own = `${wording.product}'s own ${name} app`;
+  const reason = (() => {
+    switch (refusal.kind) {
+      case "unavailable":
+        return `It signed in through Executor's own ${name} app, which ${wording.product} does not offer yet.`;
+      case "granted_scopes":
+        return `It was granted permissions ${own} does not allow.`;
+      case "requested_scopes":
+        return `Its integration asks for permissions ${own} does not allow.`;
+      case "resource":
+        return `Its integration does not sign in where ${own} does.`;
+      case "hosts": {
+        const only = `${sentence(own)} sends its tokens only to ${refusal.sendsTo.join(", ")}`;
+        return refusal.unreachable === "all"
+          ? `${only}, and its integration calls none of them.`
+          : `${only}, and its integration also calls ${refusal.unreachable.join(", ")}, where its calls would be refused.`;
+      }
+    }
+  })();
+  return `${reason} ${wording.reconnect}`;
+};
 
 /** The scopes v1 recorded a connection was granted; none when it recorded none. */
 const grantedScopes = (row: ConnectionRow) =>
@@ -216,9 +277,11 @@ const v1SetAlways: ReadonlySet<string> = new Set([
   "code_challenge_method",
 ]);
 
-const v1AuthorizationRefused = (problem: string) =>
+type Wording = Pick<V1ImportProduct["wording"], "signInMethod" | "reconnect">;
+
+const v1AuthorizationRefused = (problem: string, wording: Wording) =>
   unsupported(
-    `Its OAuth client's authorization URL ${problem}, which an Executor v2 sign-in method cannot send as v1 did. Reconnect it in v2.`,
+    `Its OAuth client's authorization URL ${problem}, which ${wording.signInMethod} cannot send as v1 did. ${wording.reconnect}`,
   );
 
 /**
@@ -237,9 +300,10 @@ const v1AuthorizationRefused = (problem: string) =>
  *   resource also goes to the token endpoint.
  * - Any other protocol parameter, such as `nonce`, has no v2 equivalent.
  */
-export const v1Authorization = (
+const v1Authorization = (
   client: Pick<OAuthClientRow, "authorization_url" | "resource">,
   scopes: readonly string[],
+  wording: Wording,
 ): Supported<V1AuthorizationRequest> | Unsupported => {
   const url = new URL(client.authorization_url);
   const reserved = new Set<string>(reservedAuthorizationParams);
@@ -249,17 +313,17 @@ export const v1Authorization = (
   );
   if (unrepresentable.length > 0)
     return unsupported(
-      `Its OAuth client's authorization URL sets ${unrepresentable.join(", ")}, which an Executor v2 sign-in method cannot send. Reconnect it in v2.`,
+      `Its OAuth client's authorization URL sets ${unrepresentable.join(", ")}, which ${wording.signInMethod} cannot send. ${wording.reconnect}`,
     );
   const clientResource = client.resource !== null && client.resource !== "";
   if (!clientResource && url.searchParams.has("resource"))
     return unsupported(
-      "Its OAuth client's authorization URL sets resource, which v1 sent only when signing in and an Executor v2 sign-in method would also send when exchanging and refreshing tokens. Reconnect it in v2.",
+      `Its OAuth client's authorization URL sets resource, which v1 sent only when signing in and ${wording.signInMethod} would also send when exchanging and refreshing tokens. ${wording.reconnect}`,
     );
   const urlScopes = url.searchParams.getAll("scope");
   const sentScopes = (): Supported<readonly string[]> | Unsupported => {
     if (scopes.length > 0 || urlScopes.length === 0) return supported(scopes);
-    if (urlScopes.length > 1) return v1AuthorizationRefused("sets scope more than once");
+    if (urlScopes.length > 1) return v1AuthorizationRefused("sets scope more than once", wording);
     return supported((urlScopes[0] ?? "").split(" "));
   };
   const requested = sentScopes();
@@ -296,8 +360,10 @@ export const integrationValues = (
     }
     return kept;
   };
-  const headers = split("header", decoded.config.headers ?? {});
-  const queryParams = split("query", decoded.config.queryParams ?? {});
+  // A local server's configuration sends nothing over HTTP.
+  const config = decoded.plugin === "stdio" ? {} : decoded.config;
+  const headers = split("header", config.headers ?? {});
+  const queryParams = split("query", config.queryParams ?? {});
   return { secrets, headers, queryParams };
 };
 
@@ -311,13 +377,36 @@ export const replaces = (
     ? placement.name.toLowerCase() === secret.name.toLowerCase()
     : placement.name === secret.name);
 
+/** The methods of a local server, which v1 sent its connections without credentials. */
+const noSignIn: ReadonlyMap<string, V1AuthMethod> = new Map([["none", { kind: "none" }]]);
+
+/**
+ * What an integration's app is generated from, or why it cannot move. A local (stdio) MCP server
+ * moves only to a product that runs its command, and only when that command is one it can run as
+ * v1 did; it is `local_server` otherwise.
+ */
 export const integrationPlan = (
+  product: Pick<V1ImportProduct, "localServers">,
   row: IntegrationRow,
 ): Supported<ImportableIntegration> | Unsupported => {
   const decoded = decodeIntegration(row);
-  return decoded.plugin === "unsupported"
-    ? { ok: false, reason: decoded.reason, stale: decoded.stale }
-    : supported(decoded);
+  switch (decoded.plugin) {
+    case "unsupported":
+      return { ok: false, reason: decoded.reason, stale: decoded.stale };
+    case "stdio":
+      return !product.localServers.runs
+        ? stale("local_server", product.localServers.refusal)
+        : !decoded.server.ok
+          ? stale("local_server", decoded.server.reason)
+          : supported({
+              plugin: "stdio",
+              server: decoded.server,
+              methods: noSignIn,
+              source: product.localServers.source,
+            });
+    default:
+      return supported(decoded);
+  }
 };
 
 /**
@@ -340,25 +429,26 @@ const connectionMethod = (
 
 /** Decide a connection from its integration's methods and, for OAuth, its client row. */
 export const connectionPlan = (
-  snapshot: Pick<V1Snapshot, "integrations" | "clients">,
-  firstParty: FirstPartyClients,
+  product: Pick<V1ImportProduct, "credentialProvider" | "firstParty" | "localServers" | "wording">,
+  snapshot: Pick<V1Rows, "integrations" | "clients">,
   row: ConnectionRow,
 ): Supported<ConnectionPlan> | Unsupported => {
+  const reconnect = product.wording.reconnect;
   const integration = snapshot.integrations.find((candidate) => candidate.slug === row.integration);
   if (integration === undefined) return unsupported("Its integration no longer exists in v1.");
-  const decoded = integrationPlan(integration);
+  const decoded = integrationPlan(product, integration);
   if (!decoded.ok)
     return { ok: false, reason: "Its integration cannot be imported.", stale: decoded.stale };
-  if (row.provider !== "workos-vault")
-    return stale(
-      "missing_credential",
-      "Its saved credential could not be found in v1. Reconnect it in v2.",
-    );
+  if (row.provider !== product.credentialProvider)
+    return {
+      ...stale("missing_credential", `Its saved credential could not be found in v1. ${reconnect}`),
+      elsewhere: row.provider,
+    };
   const method = connectionMethod(decoded.value.methods, row);
   if (method === undefined)
     return stale(
       "undeclared_method",
-      "Its sign-in method is not one its integration declares. Reconnect it in v2.",
+      `Its sign-in method is not one its integration declares. ${reconnect}`,
     );
   const plan = (access: ConnectionAccess) =>
     supported({ row, integration, decoded: decoded.value, access });
@@ -372,10 +462,7 @@ export const connectionPlan = (
       const variables = placementVariables(method.placements);
       const found = variables.map((variable) => [variable, items?.[variable]] as const);
       if (found.some(([, item]) => item === undefined))
-        return stale(
-          "incomplete_credential",
-          "Its saved credential is incomplete. Reconnect it in v2.",
-        );
+        return stale("incomplete_credential", `Its saved credential is incomplete. ${reconnect}`);
       return plan({
         kind: "secrets",
         placements: method.placements,
@@ -392,10 +479,7 @@ export const connectionPlan = (
           { carrier: "header", name: method.header, prefix: method.prefix },
         ] as const;
         if (items?.[tokenVariable] === undefined)
-          return stale(
-            "incomplete_credential",
-            "Its saved credential is incomplete. Reconnect it in v2.",
-          );
+          return stale("incomplete_credential", `Its saved credential is incomplete. ${reconnect}`);
         return plan({
           kind: "secrets",
           placements,
@@ -410,30 +494,23 @@ export const connectionPlan = (
         // from v1 are valid for it; a v2 client under a v1 name must always be v1's client.
         const name = row.oauth_client.slice(firstPartyClientPrefix.length);
         const label = firstPartyName(name);
-        const client = firstParty(name);
+        const client = product.firstParty(name);
         if (client === undefined)
-          return unsupported(
-            `It signed in through Executor's own ${label} app, which Executor v2 does not offer yet. Reconnect it in v2.`,
-          );
+          return unsupported(firstPartyRefusal(product.wording, label, { kind: "unavailable" }));
         const accessItem = items?.[tokenVariable];
         if (accessItem === undefined)
-          return stale(
-            "incomplete_credential",
-            "Its saved sign-in is incomplete. Reconnect it in v2.",
-          );
+          return stale("incomplete_credential", `Its saved sign-in is incomplete. ${reconnect}`);
         // v1 renewed with the scopes the connection was granted, and v2's client renews only a
         // grant whose scopes it allows. Its allowed scopes are reviewed code, so a grant beyond
         // them reconnects rather than widening them.
         const allowed = client.allowedScopes ?? client.defaultScopes;
         const granted = grantedScopes(row);
         if (!granted.every((scope) => allowed.includes(scope)))
-          return unsupported(
-            `It was granted permissions Executor v2's own ${label} app does not allow. Reconnect it in v2.`,
-          );
+          return unsupported(firstPartyRefusal(product.wording, label, { kind: "granted_scopes" }));
         const scopes = firstPartySignIn(client, method);
         if (scopes === undefined)
           return unsupported(
-            `Its integration asks for permissions Executor v2's own ${label} app does not allow. Reconnect it in v2.`,
+            firstPartyRefusal(product.wording, label, { kind: "requested_scopes" }),
           );
         return plan({
           kind: "first_party",
@@ -446,10 +523,7 @@ export const connectionPlan = (
       }
       const client = connectionClient(row, snapshot.clients);
       if (client === undefined)
-        return stale(
-          "missing_client",
-          "Its OAuth client no longer exists in v1. Reconnect it in v2.",
-        );
+        return stale("missing_client", `Its OAuth client no longer exists in v1. ${reconnect}`);
       const grant = Schema.decodeUnknownOption(OAuthGrantKind)(client.grant);
       if (Option.isNone(grant)) return unsupported("Its OAuth client uses an unknown grant.");
       if (grant.value === "id_jag")
@@ -461,10 +535,7 @@ export const connectionPlan = (
         return unsupported("Its OAuth client has no secret for the client credentials grant.");
       const accessItem = items?.[tokenVariable];
       if (accessItem === undefined)
-        return stale(
-          "incomplete_credential",
-          "Its saved sign-in is incomplete. Reconnect it in v2.",
-        );
+        return stale("incomplete_credential", `Its saved sign-in is incomplete. ${reconnect}`);
       // v1 signed in and renewed at the client's endpoints, whatever the method declared. The app
       // declares them, so each must be an HTTP(S) URL; v1 stores `""` for one a flow does not use.
       if (!httpUrl(client.token_url)) return unsupported("Its OAuth client has no token endpoint.");
@@ -484,7 +555,7 @@ export const connectionPlan = (
                 grant: "authorization_code" as const,
                 authorization: { kind: "discover" as const, url: decoded.value.config.endpoint },
               })
-            : mapSupported(v1Authorization(client, method.scopes), (request) => ({
+            : mapSupported(v1Authorization(client, method.scopes, product.wording), (request) => ({
                 grant: "authorization_code" as const,
                 authorization: { kind: "declared" as const, ...request },
               }));
@@ -492,7 +563,7 @@ export const connectionPlan = (
       const tokenEndpoint = refreshTokenEndpoint(client.token_url, row.oauth_token_url);
       if (tokenEndpoint === undefined)
         return unsupported(
-          "v1 no longer trusted the token endpoint its sign-in recorded. Reconnect it in v2.",
+          `v1 no longer trusted the token endpoint its sign-in recorded. ${reconnect}`,
         );
       return plan({
         kind: "oauth",
@@ -508,14 +579,14 @@ export const connectionPlan = (
 };
 
 /** The workspace's toolkits that decode, with their rules. */
-export const decodedToolkits = (snapshot: Pick<V1Snapshot, "toolkits" | "toolkitRules">) =>
+export const decodedToolkits = (snapshot: Pick<V1Rows, "toolkits" | "toolkitRules">) =>
   decodeToolkits(snapshot.toolkits, snapshot.toolkitRules);
 
 /** The note on a toolkit whose access patterns reach none of the workspace's connections. */
 export const grantsNoConnection = "It grants no connection in this workspace.";
 
 /** The connections whose tools a toolkit can reach, from their addresses alone. */
-export const toolkitConnections = (snapshot: Pick<V1Snapshot, "connections">, toolkit: V1Toolkit) =>
+export const toolkitConnections = (snapshot: Pick<V1Rows, "connections">, toolkit: V1Toolkit) =>
   snapshot.connections.filter((connection) =>
     toolkitReaches(toolkit, [connection.integration, connection.owner, connection.name]),
   );
@@ -532,7 +603,7 @@ export const artifactRepairNote =
  * why the role has none. Roles that name the same connection share its rows.
  */
 export const artifactPlan = (
-  snapshot: Pick<V1Snapshot, "integrations" | "connections">,
+  snapshot: Pick<V1Rows, "integrations" | "connections">,
   row: ArtifactRow,
 ) => {
   const { uses, builtIn } = artifactUses(row);
@@ -572,7 +643,7 @@ export const artifactPlan = (
  * never applied it.
  */
 export const policyPlan = (
-  snapshot: Pick<V1Snapshot, "integrations">,
+  snapshot: Pick<V1Rows, "integrations">,
   row: Pick<PolicyRow, "pattern" | "action">,
 ):
   | { readonly status: "will_import"; readonly integrations: readonly IntegrationRow[] }

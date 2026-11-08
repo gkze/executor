@@ -182,6 +182,11 @@ export class OrganizationIcons extends Context.Service<
 export const Inventory = Schema.Struct({
   /** The accounts the caller linked to each listed app and may use. */
   links: Schema.Array(Schema.Struct({ app: AppId, account: AccountId })),
+  /** The accounts linked for everyone to each listed app's app requirements, oldest first. */
+  appLinks: Schema.Array(
+    Schema.Struct({ app: AppId, account: AccountId, requirement: Schema.String }),
+  ),
+  /** The apps the caller may use. */
   apps: Schema.Array(App),
   /** Each account's checks by the apps listed here; reading them never runs a check. */
   accounts: Schema.Array(

@@ -18,11 +18,16 @@ import {
 } from "@executor-js/authorization";
 import { AppId } from "@executor-js/sdk/core";
 import { Context } from "effect";
-import { currentResourceAuthority, visibleAccountsAs, visibleAppsAs } from "./resource-policy.ts";
+import {
+  currentResourceAuthority,
+  policyDatabase,
+  visibleAccountsAs,
+  visibleAppsAs,
+} from "./resource-policy.ts";
 import { readOrganizationIconUpload } from "./organization-icons.ts";
 import { OrganizationTombstones } from "../contracts/organization-removal.ts";
 import { requireOrganizationAdmin } from "./access.ts";
-import { callerLinkedAccounts } from "./app-accounts.ts";
+import { appLinkedAccounts, callerLinkedAccounts } from "./app-accounts.ts";
 import { CurrentPrincipal, CurrentUserId } from "../contracts/auth.ts";
 import {
   recordCaller,
@@ -267,30 +272,44 @@ export const inventory = (owner: OwnerId) =>
           .list({ owner })
           .pipe(Effect.flatMap((listed) => visibleAccountsAs(actor, listed)))
       : [];
-    const linked = yield* callerLinkedAccounts(apps.map((app) => app.id));
+    const appIds = apps.map((app) => app.id);
+    const linked = yield* callerLinkedAccounts(appIds);
     // An account linked to several requirements of one app is listed once for it.
     const links = [
       ...new Map(
         linked.map((link) => [`${link.app}\u0000${link.id}`, { app: link.app, account: link.id }]),
       ).values(),
     ];
-    // Checks are reported for the apps the caller linked each account to.
+    const appLinks = (yield* appLinkedAccounts(yield* policyDatabase, appIds)).map((link) => ({
+      app: link.app,
+      account: link.id,
+      requirement: link.requirement,
+    }));
+    // Checks are reported for the apps that link each account, in either scope.
     const health = new Map(
-      (accounts.length === 0 ? [] : yield* executor.accounts.listHealth({ owner, links })).map(
-        (entry) => [entry.account, entry],
-      ),
+      (accounts.length === 0
+        ? []
+        : yield* executor.accounts.listHealth({
+            owner,
+            links: [...links, ...appLinks.map(({ app, account }) => ({ app, account }))],
+          })
+      ).map((entry) => [entry.account, entry]),
     );
     const withHealth = (listedAccounts: typeof accounts) =>
       listedAccounts.map((account) => {
         const checks = health.get(account.id);
         return checks === undefined ? account : { ...account, health: checks };
       });
-    if (policy.tools.kind === "all") return { apps, accounts: withHealth(accounts), links };
-    const selected = new Set(links.map((link) => link.account));
+    if (policy.tools.kind === "all")
+      return { apps, accounts: withHealth(accounts), links, appLinks };
+    // A restricted grant lists the accounts linked to its apps in either scope that the caller may
+    // read; the app links are the app's own (see `app-accounts.ts`).
+    const selected = new Set([...links, ...appLinks].map((link) => link.account));
     return {
       apps,
       accounts: withHealth(accounts.filter((account) => selected.has(account.id))),
       links,
+      appLinks,
     };
   });
 /** Organization routes do not own app/account operations. */

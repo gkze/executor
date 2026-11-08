@@ -134,13 +134,22 @@ const inventory = Atom.family((key: ListKey) =>
         .flatMap(({ app, linkedAccounts }) =>
           linkedAccounts.map((account) => ({ app: app.id, account })),
         );
+      const appLinks = data.apps
+        .filter(({ app }) => apps.some((item) => item.id === app.id))
+        .flatMap(({ app, appLinks }) => appLinks.map((link) => ({ app: app.id, ...link })));
       const accounts = data.accounts.map(({ account, provider, health }) => ({
         ...account,
         providerName: provider.definition.name,
         providerUrl: providerDisplayUrl(provider.definition),
         ...(health === undefined ? {} : { health }),
       }));
-      return { apps, accounts, links, pendingApp: key.group !== "private" && data.pendingApp };
+      return {
+        apps,
+        accounts,
+        links,
+        appLinks,
+        pendingApp: key.group !== "private" && data.pendingApp,
+      };
     }),
   ),
 );

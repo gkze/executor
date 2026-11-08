@@ -8,9 +8,11 @@
 import { expect, layer } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
+import type { Page } from "playwright";
 import { randomUUID } from "node:crypto";
 import { Api, body, type Session } from "../support/api.ts";
 import { Actors } from "../support/actors.ts";
+import { Browser } from "../support/browser.ts";
 import { HostedLive, withHostedCase } from "../support/case.ts";
 import { Resource } from "../support/contracts.ts";
 import { oauthSetupIssuer } from "../support/oauth-setup-issuer.ts";
@@ -70,6 +72,22 @@ const scopedOAuthApp = (
 const service = defineProvider({ name: "App link connection OAuth fixture", auth: { oauth: oauth2({ discover: ${JSON.stringify(`${issuer}/mcp`)} }) } });
 export default defineApp({ ${scope}: { accounts: { service } } }, async () => ({ tools: router({}) }));`;
 const SignIn = Schema.Struct({ authorizationUrl: Schema.String });
+/** The inventory's app links and the accounts the caller may read. */
+const CardInventory = Schema.Struct({
+  appLinks: Schema.Array(
+    Schema.Struct({ app: Schema.String, account: Schema.String, requirement: Schema.String }),
+  ),
+  accounts: Schema.Array(Schema.Struct({ id: Schema.String })),
+});
+/** The resource directory's app links per app. */
+const CardDirectory = Schema.Struct({
+  apps: Schema.Array(
+    Schema.Struct({
+      app: Schema.Struct({ id: Schema.String }),
+      appLinks: Schema.Array(Schema.Struct({ account: Schema.String, requirement: Schema.String })),
+    }),
+  ),
+});
 const LinkedRefusal = Schema.Struct({ _tag: Schema.String, apps: Schema.Array(Schema.String) });
 
 layer(HostedLive, { excludeTestServices: true })("App account app links", (it) => {
@@ -421,6 +439,129 @@ layer(HostedLive, { excludeTestServices: true })("App account app links", (it) =
         const linked = yield* linkedAccountIds(actors.member, path);
         expect(linked).toHaveLength(1);
         yield* fixture.saved(actors.member, linked[0] ?? "missing");
+      }),
+    ),
+  );
+  it.effect(scenarios.hostedAppCardAppLinks.title, (context) =>
+    withHostedCase(
+      context,
+      Effect.gen(function* () {
+        const browser = yield* Browser;
+        const fixture = yield* appLinksFixture([
+          {
+            path: "index.ts",
+            content: `import { defineApp, defineProvider, secrets, object, string, router } from "apps";
+const team = ${keyProvider("App card team fixture")};
+export default defineApp({ app: { accounts: { team } } }, async () => ({ tools: router({}) }));`,
+          },
+        ]);
+        const { api, actors, prefix, app, connect } = fixture;
+        const read = <A>(
+          actor: Session,
+          route: string,
+          schema: Schema.ConstraintDecoder<A, never>,
+        ) =>
+          api
+            .request(actor, "GET", `${prefix}/${route}`)
+            .pipe(Effect.flatMap((response) => okBody(schema, response)));
+        const card = (actor: Session, step: string) =>
+          Effect.gen(function* () {
+            yield* browser.login(actor);
+            yield* browser.use(`Open the app list (${step})`, (page) =>
+              page.goto(`/org/${actors.organization.slug}/apps`),
+            );
+            const text = yield* browser.use(`Read the app's card (${step})`, (page) =>
+              page.getByRole("link", { name: `Open ${app.name}`, exact: true }).innerText(),
+            );
+            yield* browser.checkpoint(`App card ${step}`);
+            return text;
+          });
+
+        // With nothing linked for everyone, the app requirement is missing.
+        expect(yield* card(actors.member, "before the app link")).toContain("Needs account");
+
+        // A manager links their personal account for everyone. Both read routes list the app link
+        // to every member, though only the manager may read the account; the card names it to the
+        // manager and counts it for the member.
+        const team = yield* connect(actors.owner, "app", "team", "Team key");
+        const members = [
+          {
+            actor: actors.owner,
+            step: "for the manager",
+            readable: true,
+            card: "Team key (for everyone)",
+          },
+          {
+            actor: actors.member,
+            step: "for a member",
+            readable: false,
+            card: "1 account for everyone",
+          },
+        ];
+        for (const { actor, step, readable, card: shown } of members) {
+          const inventory = yield* read(actor, "inventory", CardInventory);
+          expect(inventory.appLinks.filter((link) => link.app === app.id)).toEqual([
+            { app: app.id, account: team, requirement: "team" },
+          ]);
+          expect(inventory.accounts.some((account) => account.id === team)).toBe(readable);
+          const directory = yield* read(actor, "resources", CardDirectory);
+          expect(directory.apps.find((entry) => entry.app.id === app.id)?.appLinks).toEqual([
+            { account: team, requirement: "team" },
+          ]);
+          expect(yield* card(actor, step)).toContain(shown);
+        }
+
+        // The manager's account list names the app the account is linked to for everyone.
+        yield* browser.login(actors.owner);
+        yield* browser.use("Open the linked account", (page) =>
+          page.goto(`/org/${actors.organization.slug}/accounts?account=${team}`),
+        );
+        yield* browser.use("The account lists the app", (page) =>
+          page.locator('[aria-current="true"]').getByRole("link", { name: app.name }).waitFor(),
+        );
+
+        // Unlinking it on the app's Accounts tab updates the card as soon as the manager returns
+        // to Apps within the same page, before the loaded list would go stale on its own.
+        const cardText = (page: Page) =>
+          page.getByRole("link", { name: `Open ${app.name}`, exact: true }).innerText();
+        yield* browser.use("Open Apps with the account linked", (page) =>
+          page
+            .goto(`/org/${actors.organization.slug}/apps`)
+            .then(() => expect.poll(() => cardText(page)).toContain("Team key (for everyone)")),
+        );
+        yield* browser.use("Open the app's Accounts tab in the page", (page) =>
+          page
+            .getByRole("link", { name: `Open ${app.name}`, exact: true })
+            .click()
+            .then(() =>
+              page
+                .getByRole("navigation", { name: "App navigation" })
+                .getByRole("link", { name: "Accounts", exact: true })
+                .click(),
+            ),
+        );
+        yield* browser.use("Unlink the account for everyone", (page) =>
+          page
+            .getByRole("button", { name: "Manage Team key", exact: true })
+            .click()
+            .then(() => page.getByRole("menuitem", { name: "Unlink", exact: true }).click())
+            .then(() =>
+              page
+                .getByRole("dialog", { name: "Delete unused account?" })
+                .getByRole("button", { name: "Keep account", exact: true })
+                .click(),
+            ),
+        );
+        yield* browser.use("Return to Apps in the page", (page) =>
+          page
+            .getByRole("navigation", { name: "Main navigation" })
+            .getByRole("link", { name: /^Apps/ })
+            .click(),
+        );
+        yield* browser.use("The card shows the requirement missing again", (page) =>
+          expect.poll(() => cardText(page), { timeout: 5_000 }).toContain("Needs account"),
+        );
+        yield* browser.checkpoint("App card after unlinking for everyone");
       }),
     ),
   );

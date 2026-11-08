@@ -132,6 +132,11 @@ export const ResourceDirectory = Schema.Struct({
       access: AppAccess,
       /** The accounts the caller linked to the app and may use; empty when they cannot use it. */
       linkedAccounts: Schema.Array(AccountId),
+      /**
+       * The accounts linked for everyone to the app's app requirements, oldest first; empty when
+       * the caller cannot use the app.
+       */
+      appLinks: Schema.Array(Schema.Struct({ account: AccountId, requirement: Schema.String })),
     }),
   ),
   accounts: Schema.Array(

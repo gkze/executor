@@ -7882,6 +7882,16 @@ export const scenarios = plan({
       cloud: na("Hosted managers and members have their own scenarios."),
     },
   },
+  localAppCardAppLinks: {
+    file: "local-app-accounts-tab.spec.ts",
+    title:
+      "the local app list shows an account linked for everyone on the app's card, and an app requirement with none as needing an account, and the account list names the app",
+    targets: {
+      local: scheduled,
+      "self-host": na("Hosted managers and members have their own scenario."),
+      cloud: na("Hosted managers and members have their own scenario."),
+    },
+  },
   hostedManyAccounts: {
     fixtures: "actors",
     file: "hosted-app-accounts.spec.ts",
@@ -7898,6 +7908,17 @@ export const scenarios = plan({
     file: "app-account-app-links.spec.ts",
     title:
       "hosted app requirements use the accounts managers link for everyone; members list those app links without upstream identity but cannot read a requirement's choices, change or override them, and unlinking needs an app link again",
+    targets: {
+      local: na("Hosted managers and members; Local app links have their own scenario."),
+      "self-host": scheduled,
+      cloud: scheduled,
+    },
+  },
+  hostedAppCardAppLinks: {
+    fixtures: "actors",
+    file: "app-account-app-links.spec.ts",
+    title:
+      "the hosted inventory and resource directory list each app's links for everyone to every member; the app card names the account to a manager who may read it and counts it for a member who may not, and the manager's account list names the app",
     targets: {
       local: na("Hosted managers and members; Local app links have their own scenario."),
       "self-host": scheduled,

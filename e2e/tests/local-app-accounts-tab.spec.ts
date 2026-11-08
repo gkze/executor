@@ -269,4 +269,73 @@ layer(TestLive, { excludeTestServices: true })("Local Accounts tab", (it) => {
       }),
     ),
   );
+  it.effect(scenarios.localAppCardAppLinks.title, (context) =>
+    withCase(
+      context,
+      Effect.gen(function* () {
+        const api = yield* Api,
+          browser = yield* Browser;
+        const { agent, headers } = yield* localAgent;
+        const name = `Team key ${randomUUID().slice(0, 8)}`;
+        const { app } = yield* body(
+          Deployed,
+          yield* api.request(agent, "POST", "/v1/apps/deploy", {
+            owner: "local",
+            name,
+            files: [
+              {
+                path: "index.ts",
+                content: `import { defineApp, defineProvider, secrets, object, string, router } from "apps";
+const team = defineProvider({ name: "Team", auth: { key: secrets({ label: "Key", fields: object({ token: string() }) }) } });
+export default defineApp({ app: { accounts: { team } } }, async () => ({ tools: router({}) }));`,
+              },
+              appsManifest,
+            ],
+          }),
+        );
+        const owned = [`/v1/apps/${app.id}`];
+        // The app goes first: an account linked to it for everyone cannot be deleted.
+        yield* Effect.addFinalizer(() =>
+          Effect.forEach(owned, (path) => api.request(agent, "DELETE", path)).pipe(Effect.orDie),
+        );
+        const card = (step: string) =>
+          Effect.gen(function* () {
+            yield* browser.use(`Open the app list (${step})`, (page) => page.goto("/apps"));
+            const text = yield* browser.use(`Read the app's card (${step})`, (page) =>
+              page.getByRole("link", { name: `Open ${name}`, exact: true }).innerText(),
+            );
+            yield* browser.checkpoint(`App card ${step}`);
+            return text;
+          });
+
+        yield* pairLocalBrowser(agent);
+        // With nothing linked for everyone, the app requirement is missing.
+        expect(yield* card("before the app link")).toContain("Needs account");
+
+        // Connecting for the app requirement links the account for everyone; the card names it.
+        const team = (yield* connectLocalAccount(
+          agent,
+          {
+            app: app.id,
+            requirement: "team",
+            method: "key",
+            label: "Team key",
+            fields: { token: `synthetic-${randomUUID()}` },
+          },
+          headers,
+        )).id;
+        owned.push(`/v1/accounts/${team}`);
+        expect(yield* localAccountLinks(agent, app.id, "app")).toEqual([["team", team]]);
+        expect(yield* card("after the app link")).toContain("Team key (for everyone)");
+
+        // The account list names the app the account is linked to for everyone.
+        yield* browser.use("Open the linked account", (page) =>
+          page.goto(`/accounts?account=${team}`),
+        );
+        yield* browser.use("The account lists the app", (page) =>
+          page.locator('[aria-current="true"]').getByRole("link", { name }).waitFor(),
+        );
+      }),
+    ),
+  );
 });

@@ -11,9 +11,36 @@ export interface AppAccountLink {
   readonly account: AccountId;
 }
 
+/** An account linked for everyone to one of an app's app requirements, as the inventory lists it. */
+export interface AppScopeLink extends AppAccountLink {
+  readonly requirement: string;
+}
+
+/** An inventory's links: the caller's own, and the app links made for everyone. */
+export interface InventoryLinks {
+  readonly links: readonly AppAccountLink[];
+  readonly appLinks: readonly AppScopeLink[];
+}
+
 /** The ids of the accounts linked to one app, in link order. */
 export const linkedAccountIds = (links: readonly AppAccountLink[], app: AppId) =>
   links.flatMap((link) => (link.app === app ? [link.account] : []));
+
+/** The ids of the accounts linked to one app in either scope, each once, the caller's first. */
+export const appAccountIds = (inventory: InventoryLinks, app: AppId) => [
+  ...new Set([
+    ...linkedAccountIds(inventory.links, app),
+    ...linkedAccountIds(inventory.appLinks, app),
+  ]),
+];
+
+/** The ids of the apps an account is linked to in either scope, each once. */
+export const accountAppIds = (inventory: InventoryLinks, account: AccountId) =>
+  new Set(
+    [...inventory.links, ...inventory.appLinks].flatMap((link) =>
+      link.account === account ? [link.app] : [],
+    ),
+  );
 
 interface LinkedAccount {
   readonly id: AccountId;
@@ -35,8 +62,7 @@ export interface RequirementChoice<A> {
 /**
  * One requirement with its linked accounts, oldest first, and the ones the app runs with: the one
  * of a plain requirement, or every one of a many() requirement. A plain requirement with none is
- * missing. `known` is false when the host has not read the requirement's links, such as the apps
- * list, whose inventory names no requirements.
+ * missing. `known` is false when the host has not read the requirement's links.
  */
 export interface RequirementAccounts<A extends LinkedAccount> {
   readonly slot: string;

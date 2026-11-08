@@ -31,6 +31,7 @@ import {
 } from "../components/setup-page.tsx";
 import { SetupLink, useSetupSequence, useSetupViewed } from "../components/setup-sequence.tsx";
 import { AppConnectionDialogContent, methodsOf } from "./app-accounts.tsx";
+import { appAccountIds } from "@executor-js/ui/contracts/app-accounts";
 import { ConnectionModal } from "./connection-dialog.tsx";
 import { OAuthReturnContext } from "./connect-account.tsx";
 import {
@@ -70,7 +71,10 @@ interface SetupApp {
   readonly entry: CatalogEntry;
   readonly detail: string;
   readonly app: App | undefined;
-  /** The accounts linked to the installed app first, then other saved accounts of its providers. */
+  /**
+   * The accounts linked to the installed app first, for the caller or for everyone, then other
+   * saved accounts of its providers.
+   */
   readonly accounts: readonly Account[];
 }
 
@@ -87,8 +91,8 @@ function setupApps(entries: readonly CatalogEntry[], inventory: Inventory): read
       const app = installed.get(entry.package);
       const detail = details.get(entry.id) ?? entry.description;
       if (app === undefined) return { entry, detail, app, accounts: [] };
-      const linked = inventory.links.flatMap((link) =>
-        link.app === app.id ? inventory.accounts.filter((item) => item.id === link.account) : [],
+      const linked = appAccountIds(inventory, app.id).flatMap((id) =>
+        inventory.accounts.filter((item) => item.id === id),
       );
       const providers = new Set(
         Object.values(app.requirements.accounts).map((requirement) => requirement.provider),

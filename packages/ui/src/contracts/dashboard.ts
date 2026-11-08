@@ -15,9 +15,11 @@ import type {
 import type { CatalogImport } from "@executor-js/catalog/contracts";
 import type { CatalogIcons } from "./icons.ts";
 import {
+  linkedAccountIds,
   missingRequirements,
+  requirementAccounts,
   usedAccounts,
-  type AppAccountLink,
+  type InventoryLinks,
   type RequirementAccounts,
 } from "./app-accounts.ts";
 import type {
@@ -56,11 +58,14 @@ export interface AccountDetail {
   readonly revocation: "automatic" | "manual";
   readonly canManage: boolean;
 }
-/** The common inventory contains no product permission or organization fields. */
-export interface Inventory {
+/**
+ * The common inventory contains no product permission or organization fields. `links` are the
+ * caller's linked accounts for each listed app; `appLinks` the accounts linked for everyone to each
+ * listed app's app requirements, oldest first, whose accounts appear in `accounts` only when the
+ * caller may read them.
+ */
+export interface Inventory extends InventoryLinks {
   readonly apps: readonly App[];
-  /** The caller's linked accounts for each listed app. */
-  readonly links: readonly AppAccountLink[];
   readonly accounts: readonly AccountSummary[];
 }
 /** Any Effect Atom source, including a live stream or a one-shot HTTP query. */
@@ -243,6 +248,55 @@ export function appToolReadiness<A extends AccountSummary>(
   });
   return { state: "ready", warnings };
 }
+/**
+ * What an app's card shows of its accounts: the caller's own linked accounts, then the readable
+ * accounts linked for everyone that are not also the caller's, and how many of those the caller
+ * may not read. A user requirement counts any own account of its provider, since user links name
+ * no requirement; an app requirement counts its app links, readable or not. The card reports
+ * whether the app can run, so an account linked for everyone that needs sign-in counts though only
+ * someone who manages it can fix it.
+ */
+export const appCardAccounts = (inventory: Inventory, app: App) => {
+  const readable = (ids: readonly AccountId[]) =>
+    ids.flatMap((id) => {
+      const account = inventory.accounts.find((item) => item.id === id);
+      return account === undefined ? [] : [account];
+    });
+  const ownIds = linkedAccountIds(inventory.links, app.id);
+  const own = readable(ownIds);
+  const user = Object.entries(app.requirements.accounts).flatMap(([slot, requirement]) =>
+    requirement.scope === "user"
+      ? own
+          .filter((account) => account.provider === requirement.provider)
+          .map((account) => ({ requirement: slot, account }))
+      : [],
+  );
+  // Links to a requirement the app no longer declares are not used, so they are not shown.
+  const appScope = inventory.appLinks.flatMap((link) => {
+    const requirement = app.requirements.accounts[link.requirement];
+    return link.app === app.id && requirement?.scope === "app"
+      ? [
+          {
+            requirement: link.requirement,
+            account: { id: link.account, provider: requirement.provider },
+          },
+        ]
+      : [];
+  });
+  const sharedIds = [...new Set(appScope.map((link) => link.account.id))].filter(
+    (id) => !ownIds.includes(id),
+  );
+  const shared = readable(sharedIds);
+  const shown = [...own, ...shared];
+  return {
+    own,
+    shared,
+    unreadable: sharedIds.length - shared.length,
+    missing: missingRequirements(requirementAccounts(app, { user, app: appScope })).length > 0,
+    needsSignIn: shown.some((account) => accountNeedsSignIn(account)),
+    unavailable: shown.some((account) => account.signIn?.state === "unavailable"),
+  };
+};
 /** many() requirements known to have no account: their tools list empty rather than failing. */
 export const emptyManyRequirements = <A extends AccountSummary>(
   requirements: readonly RequirementAccounts<A>[],

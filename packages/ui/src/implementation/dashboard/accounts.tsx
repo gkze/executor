@@ -10,6 +10,7 @@ import { ArrowUpRight01Icon } from "@hugeicons/core-free-icons";
 import type { AccountId } from "@executor-js/sdk";
 import type { Inventory, AccountSummary, QueryProps } from "../../contracts/dashboard.ts";
 import { accountNeedsSignIn } from "../../contracts/dashboard.ts";
+import { accountAppIds } from "../../contracts/app-accounts.ts";
 
 import { Empty, ProviderIcon, SearchInput } from "./common.tsx";
 import { Button } from "../components/button.tsx";
@@ -120,9 +121,8 @@ function AccountsList({
             <span className="sr-only">Actions</span>
           </div>
           {accounts.map((account) => {
-            const apps = data.apps.filter((app) =>
-              data.links.some((link) => link.app === app.id && link.account === account.id),
-            );
+            const linked = accountAppIds(data, account.id);
+            const apps = data.apps.filter((app) => linked.has(app.id));
             return (
               <div
                 className="inventory-row accounts-grid grid grid-cols-[minmax(200px,_1.5fr)_minmax(130px,_0.8fr)_minmax(170px,_1fr)_auto] gap-6.25 items-center py-[12px] px-[16px] border-t border-t-border min-h-16 [a&:hover]:bg-muted max-[1000px]:grid-cols-[minmax(0,_1.3fr)_minmax(0,_1fr)_auto] max-[1000px]:gap-4 max-[1000px]:[.inventory-header&_>_span:nth-child(2)]:hidden max-[740px]:grid-cols-[minmax(0,_1fr)_auto] max-[740px]:gap-3 max-[740px]:py-[12px] data-[highlighted]:bg-accent data-[highlighted]:shadow-[inset_3px_0_0_var(--color-ring)] max-[740px]:px-[16px] max-[740px]:[&:first-of-type]:border-t-0 max-[740px]:[.inventory-header_+_&]:border-t-0"

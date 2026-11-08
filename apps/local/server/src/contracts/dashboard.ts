@@ -422,8 +422,12 @@ export const providerDisplayUrl = (
 /** A cheap inventory read, without evaluating app code or fetching live tool catalogs. */
 export const DashboardOverview = Schema.Struct({
   apps: Schema.Array(App),
-  /** The accounts linked to each app, oldest first. */
+  /** The accounts linked for the local user to each app, oldest first. */
   links: Schema.Array(Schema.Struct({ app: AppId, account: AccountId })),
+  /** The accounts linked for everyone to each app's app requirements, oldest first. */
+  appLinks: Schema.Array(
+    Schema.Struct({ app: AppId, account: AccountId, requirement: Schema.String }),
+  ),
   accounts: Schema.Array(DashboardAccount),
 });
 export type DashboardOverview = typeof DashboardOverview.Type;

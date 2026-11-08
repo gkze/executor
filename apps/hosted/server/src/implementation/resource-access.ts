@@ -16,7 +16,7 @@ import {
   type AccessRevision,
 } from "../contracts/resource-access.ts";
 import { requireGroupSharing } from "./group-sharing.ts";
-import { callerLinkedAccounts } from "./app-accounts.ts";
+import { appLinkedAccounts, callerLinkedAccounts } from "./app-accounts.ts";
 import {
   policyDatabase,
   currentResourceAuthority,
@@ -48,25 +48,29 @@ export const resourceDirectory = (view: "available" | "managed" = "available") =
     });
     const usableApps = listedApps.filter(({ access }) => access.canUse).map(({ app }) => app.id);
     const links = yield* callerLinkedAccounts(usableApps);
+    const appLinks = yield* appLinkedAccounts(yield* policyDatabase, usableApps);
     const appEntries = listedApps.map(({ app, access }) => ({
       app,
       access,
       linkedAccounts: [
         ...new Set(links.filter((link) => link.app === app.id).map((link) => link.id)),
       ],
+      appLinks: appLinks.flatMap((link) =>
+        link.app === app.id ? [{ account: link.id, requirement: link.requirement }] : [],
+      ),
     }));
-    const linked = new Set(links.map((link) => link.id));
+    const linked = new Set([...links, ...appLinks].map((link) => link.id));
     const accounts = (yield* executor.accounts.list({ owner })).filter(
       (account) => policy.tools.kind === "all" || linked.has(account.id),
     );
     const providers = new Map<ProviderId, Provider>();
-    // Checks are reported for the apps the caller linked each account to.
+    // Checks are reported for the apps that link each account, in either scope.
     const health = new Map(
       (accounts.length === 0
         ? []
         : yield* executor.accounts.listHealth({
             owner,
-            links: links.map((link) => ({ account: link.id, app: link.app })),
+            links: [...links, ...appLinks].map((link) => ({ account: link.id, app: link.app })),
           })
       ).map((entry) => [entry.account, entry]),
     );

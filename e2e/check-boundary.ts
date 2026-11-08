@@ -74,6 +74,9 @@ const check = Effect.gen(function* () {
             allowed.has(specifier)
           )
             return;
+          // This fixture writes Executor 1's own SQLite file for the import to read, never the
+          // product's storage.
+          if (label === `support${path.sep}v1-local-data.ts` && specifier === "node:sqlite") return;
           // This adapter observes the real OS store, never an application implementation.
           if (label === `support${path.sep}os-credential.ts` && specifier === "@napi-rs/keyring")
             return;

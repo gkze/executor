@@ -95,6 +95,8 @@ import { LocalExecutorApi, localManagementDocument } from "../contracts/manageme
 import { bundledGit, nativeRepositories, systemGit } from "@executor-js/app-source/node";
 import { feedbackDisabled } from "@executor-js/telemetry/product-analytics";
 import { LocalFeedbackApi } from "../contracts/feedback.ts";
+import { LocalV1ImportApi } from "../contracts/v1-import.ts";
+import { makeV1Import } from "./v1-import-apply.ts";
 import { localAnalytics, observeLocalExecutor, scheduleAnalytics } from "./product-analytics.ts";
 import {
   linkedOperation,
@@ -300,6 +302,14 @@ export const localApi = (
       const api = observed("api");
       // Callers never choose accounts; the served operations use the accounts linked to the app.
       const linked = linkedOperation(sql, api);
+      // Executor 1 imports write this data directory, so they run here, one request at a time.
+      const v1Import = yield* makeV1Import({
+        executor,
+        sql,
+        directory,
+        platform: process.platform,
+        http: httpClient,
+      });
       const programmatic = Layer.mergeAll(
         HttpRouter.add(
           "GET",
@@ -369,6 +379,13 @@ export const localApi = (
           ),
           // A choice the contract cannot decode is refused as a decoded one is.
           Layer.provide(accountChoiceRejections),
+        ),
+        HttpApiBuilder.layer(LocalV1ImportApi).pipe(
+          Layer.provide(
+            HttpApiBuilder.group(LocalV1ImportApi, "v1Import", (handlers) =>
+              Effect.succeed(handlers.handle("run", ({ payload }) => v1Import.run(payload))),
+            ),
+          ),
         ),
         HttpApiBuilder.layer(LocalFeedbackApi).pipe(
           Layer.provide(

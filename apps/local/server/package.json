@@ -33,6 +33,7 @@
     "@executor-js/sdk": "workspace:*",
     "@executor-js/telemetry": "workspace:*",
     "@executor-js/utils": "workspace:*",
+    "@executor-js/v1-import": "workspace:*",
     "@napi-rs/keyring": "2.1.0",
     "apps": "workspace:*",
     "better-auth": "1.7.16",

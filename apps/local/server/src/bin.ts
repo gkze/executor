@@ -55,6 +55,8 @@ import {
   serviceUnset,
 } from "./implementation/service-settings.ts";
 import { upgrade } from "./implementation/upgrade.ts";
+import { importV1Command, V1ImportFailed } from "./contracts/v1-import.ts";
+import { importV1 } from "./implementation/v1-import-command.ts";
 
 // The file that started the CLI shows how it was installed: the npm launcher, or the release
 // executable itself, names itself in EXECUTOR_LAUNCHER; otherwise it is the script Node started.
@@ -73,6 +75,7 @@ const explained = Schema.is(
     UpgradeFailed,
     ServiceFailed,
     ServiceSettingInvalid,
+    V1ImportFailed,
   ]),
 );
 
@@ -136,6 +139,7 @@ const cli = executorCommand.pipe(
       ]),
     ),
     pairCommand.pipe(Command.withHandler(() => pair)),
+    importV1Command.pipe(Command.withHandler((options) => importV1(options, localServer))),
     upgradeCommand.pipe(
       Command.withHandler((options) =>
         upgrade(options, {

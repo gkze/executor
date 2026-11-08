@@ -1765,6 +1765,28 @@ export const scenarios = plan({
       "self-host": na("Local CLI commands"),
     },
   },
+  localV1ImportDryRun: {
+    file: "local-v1-import.spec.ts",
+    title:
+      "executor import-v1 --dry-run reports what each Executor 1 integration, connection and tool policy becomes, per workspace, without writing anything or printing a saved credential",
+    targets: {
+      local: scheduled,
+      cloud: na("Local Executor 1 import"),
+      "self-host": na("Local Executor 1 import"),
+    },
+  },
+  localV1Import: {
+    // The CLI starts the background Executor the import runs in.
+    fixtures: "cli",
+    file: "local-v1-import.spec.ts",
+    title:
+      "executor import-v1 imports each Executor 1 integration as an app with its tool policies as approval rules and each connection as an account linked to it for the person, reports what the background Executor did with each item, and a rerun moves nothing twice, finds the app and account an interrupted run made, and never replaces a version the person deployed",
+    targets: {
+      local: scheduled,
+      cloud: na("Local Executor 1 import"),
+      "self-host": na("Local Executor 1 import"),
+    },
+  },
   localServiceSharedStart: {
     // The CLI starts and stops its own servers; an outer managed server would compete with them.
     fixtures: "cli",

@@ -4,7 +4,7 @@
  * is exposed to the renderer.
  */
 import { resolve } from "node:path";
-import { app, BrowserWindow, dialog, Menu, nativeTheme, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { rotatingJsonLogger } from "@executor-js/telemetry/files";
 import { startProcessMetrics } from "@executor-js/telemetry/process";
@@ -31,6 +31,7 @@ import { OAuthCallbackPath } from "@executor-js/local-server/contracts";
 import { desktopReturnHeader } from "../../server/src/contracts/desktop-return.ts";
 import { ServiceFailed } from "../../server/src/contracts/service.ts";
 import { DesktopFailed, externalUrl, type DesktopRecovery } from "./contracts/desktop.ts";
+import { titlebarChannel, type Titlebar } from "./contracts/titlebar.ts";
 import { release } from "../../../../scripts/releases/config.ts";
 import { makeUpdater } from "./implementation/updates.ts";
 import { makeOpenBrowserAction } from "./implementation/browser.ts";
@@ -86,6 +87,28 @@ const dashboardRetryDelay = Duration.seconds(2);
 /** The dashboard's `--background` token for the system appearance, painted before content loads. */
 const windowBackground = () => (nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
 
+/**
+ * On macOS the window hides its title bar and macOS draws the window controls over the page.
+ * This is the one place that sets their geometry: the controls are centered vertically in a band
+ * `titlebarHeight` tall, which the dashboard's sidebar header takes as its height.
+ * `trafficLightPosition` places their top-left corner. macOS does not report their size; the
+ * width was measured in the window. Windows and Linux keep their native frames.
+ */
+const insetTitlebar = process.platform === "darwin";
+const titlebarHeight = 48;
+const windowControls = { left: 18, width: 60, height: 14 };
+const windowControlsTop = (titlebarHeight - windowControls.height) / 2;
+
+/**
+ * The dashboard lays itself out around the controls from these properties, which the preload
+ * applies while its root carries `data-desktop-titlebar` (see `preload.ts` and `DashboardShell`).
+ */
+const titlebarProperties = {
+  "--desktop-titlebar-height": `${titlebarHeight}px`,
+  "--desktop-controls-end": `${windowControls.left + windowControls.width}px`,
+  "--desktop-controls-bottom": `${windowControlsTop + windowControls.height}px`,
+};
+
 const newWindow = (browserSession: Electron.Session) =>
   new BrowserWindow({
     width: 1180,
@@ -95,9 +118,17 @@ const newWindow = (browserSession: Electron.Session) =>
     title: "Executor",
     show: false,
     backgroundColor: windowBackground(),
+    ...(insetTitlebar
+      ? {
+          titleBarStyle: "hidden" as const,
+          trafficLightPosition: { x: windowControls.left, y: windowControlsTop },
+        }
+      : {}),
     webPreferences: {
       backgroundThrottling: false,
       session: browserSession,
+      // Bundled beside this entry by `scripts/build.mjs`.
+      ...(insetTitlebar ? { preload: resolve(__dirname, "preload.cjs") } : {}),
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -242,7 +273,7 @@ const desktop = Effect.gen(function* () {
     });
     earlyPage = page;
   };
-  showEarly(startupUrl);
+  showEarly(startupUrl(insetTitlebar));
   // Before anything uses the shared directory, the desktop's old data moves into it, once.
   let movingSince = Option.none<DateTime.Utc>();
   const migration = yield* Option.match(legacy, {
@@ -258,7 +289,7 @@ const desktop = Effect.gen(function* () {
           onMoving: Effect.gen(function* () {
             movingSince = Option.some(yield* DateTime.now);
             yield* Effect.logInfo("Moving the desktop's data");
-            showEarly(movingUrl);
+            showEarly(movingUrl(insetTitlebar));
           }),
         }),
       ),
@@ -333,12 +364,33 @@ const desktop = Effect.gen(function* () {
           ),
         );
         browserSession.setPermissionCheckHandler(() => false);
+        // The preload asks before each page's first paint, with the page's origin, which the
+        // window's frame may not report yet while the page commits; the answer holds nothing
+        // secret. Only the window's dashboard pages are laid out around the controls. The answer
+        // is always set, as the page waits for it.
+        const answerTitlebar = (event: Electron.IpcMainEvent, pageOrigin: unknown) => {
+          const current = window;
+          event.returnValue =
+            current !== undefined &&
+            !current.isDestroyed() &&
+            event.sender === current.webContents &&
+            pageOrigin === origin()
+              ? ({
+                  properties: titlebarProperties,
+                  shown: !current.isFullScreen(),
+                } satisfies Titlebar)
+              : false;
+        };
+        ipcMain.on(titlebarChannel, answerTitlebar);
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => ipcMain.removeListener(titlebarChannel, answerTitlebar)),
+        );
         const viewUrl = () => {
           switch (view.kind) {
             case "starting":
-              return startupUrl;
+              return startupUrl(insetTitlebar);
             case "recovery":
-              return recoveryUrl(view.recovery);
+              return recoveryUrl(view.recovery, insetTitlebar);
             case "ready": {
               const url = view.pairing ?? view.origin;
               view = { ...view, pairing: undefined };
@@ -634,7 +686,7 @@ const desktop = Effect.gen(function* () {
           if (
             Option.isNone(action) ||
             view.kind !== "recovery" ||
-            current.webContents.getURL() !== recoveryUrl(view.recovery) ||
+            current.webContents.getURL() !== recoveryUrl(view.recovery, insetTitlebar) ||
             !recoveryActions(view.recovery).includes(action.value)
           )
             return;
@@ -683,6 +735,15 @@ const desktop = Effect.gen(function* () {
             if (!current.isDestroyed() && origin() !== undefined)
               current.webContents.setBackgroundThrottling(true);
           });
+          // Full screen hides the window controls, and the page stops making room for them.
+          if (insetTitlebar) {
+            const followFullScreen = () => {
+              if (!current.isDestroyed())
+                current.webContents.send(titlebarChannel, !current.isFullScreen());
+            };
+            current.on("enter-full-screen", followFullScreen);
+            current.on("leave-full-screen", followFullScreen);
+          }
           current.once("closed", () => {
             if (window === current) window = undefined;
             // Closing the window before the dashboard was ever ready ends the launch.

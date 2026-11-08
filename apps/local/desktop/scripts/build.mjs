@@ -1,6 +1,6 @@
 /**
- * Bundle the native entry, and the server starter it runs in a utility process, while keeping
- * Electron's runtime API external, as T3 Code does.
+ * Bundle the native entry, the server starter it runs in a utility process and the window's
+ * preload, while keeping Electron's runtime API external, as T3 Code does.
  */
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -11,6 +11,7 @@ export async function buildDesktop() {
     entryPoints: {
       main: `${desktop}/src/main.ts`,
       starter: `${desktop}/src/starter.ts`,
+      preload: `${desktop}/src/preload.ts`,
     },
     outdir: `${desktop}/dist`,
     outExtension: { ".js": ".cjs" },

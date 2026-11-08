@@ -38,6 +38,34 @@ const navigationClass =
 const collapsedClass =
   "[&_.sidebar-header]:justify-center [&_.wordmark]:hidden [&_nav_a]:justify-center [&_nav_a]:gap-0! [&_nav_a]:px-0! [&_nav_a]:h-9 [&_nav_a]:text-[0px]! [&_nav_a_>_span]:hidden [&_.sidebar-resource-links]:items-center [&_.sidebar-resource-links]:px-0 [&_.sidebar-resource-links_a]:w-full [&_.sidebar-resource-links_a]:justify-center [&_.sidebar-resource-links_a]:min-h-8 [&_.sidebar-resource-links_a_>_span]:hidden [&_.sidebar-resource-links_button]:w-full [&_.sidebar-resource-links_button]:justify-center [&_.sidebar-resource-links_button]:min-h-8 [&_.sidebar-resource-links_button_>_span]:hidden [&_.hosted-identity]:px-0 [&_.organization-trigger]:justify-center [&_.organization-trigger]:px-0 [&_.organization-name]:hidden [&_.organization-chevron]:hidden [&_.session-menu]:justify-center [&_.session-menu]:px-0 [&_.session-name]:hidden [&_.sidebar-version]:hidden";
 
+/**
+ * The macOS desktop draws its window controls over the page's top left. It marks the root with
+ * `data-desktop-titlebar` and publishes the controls' geometry as `--desktop-titlebar-height`,
+ * `--desktop-controls-end` and `--desktop-controls-bottom`; the classes below lay the shell out
+ * around them. In Electron a drag region takes the clicks on anything inside it that does not opt
+ * out, so the window drags only by space that holds no controls: the sidebar header around its
+ * items, and a strip above the page, which starts below it.
+ *
+ * The header spans the sidebar's padding, so its left padding clears the controls from the
+ * window's edge and the brand centers between them and the border. The logo's box is 5px wider
+ * than its image on the left; the same space on the right centers what is visible. Between the
+ * phone layout and a wide screen the expanded rail shows its toggle instead of the logo, and is
+ * narrow enough that the wordmark may be cut short rather than overflow.
+ */
+const insetTitlebarHeaderClass =
+  "[[data-desktop-titlebar]_&]:min-h-[var(--desktop-titlebar-height)] [[data-desktop-titlebar]_&]:justify-center [[data-desktop-titlebar]_&]:-mx-[8px] [[data-desktop-titlebar]_&]:pl-[var(--desktop-controls-end)] [[data-desktop-titlebar]_&]:pr-[5px] [[data-desktop-titlebar]_&]:max-[1000px]:pr-0 [[data-desktop-titlebar]_&_.wordmark>span]:truncate [[data-desktop-titlebar]_&]:[-webkit-app-region:drag] [[data-desktop-titlebar]_&>*]:[-webkit-app-region:no-drag]";
+
+/** The icon rail is narrower than the window controls, so its header sits below them. */
+const insetTitlebarCollapsedHeaderClass =
+  "[[data-desktop-titlebar]_&]:pt-[var(--desktop-controls-bottom)] [[data-desktop-titlebar]_&]:[-webkit-app-region:drag] [[data-desktop-titlebar]_&>*]:[-webkit-app-region:no-drag]";
+
+/**
+ * Zooming in can bring the window under the phone breakpoint, where the page starts at the top
+ * left; the strip then reaches below the window controls.
+ */
+const insetTitlebarStripClass =
+  "hidden [[data-desktop-titlebar]_&]:block shrink-0 h-3 max-[740px]:h-[var(--desktop-controls-bottom)] [-webkit-app-region:drag]";
+
 /** Links and the optional support trigger share one compact style. */
 function ResourceLinks({
   docsUrl,
@@ -106,7 +134,9 @@ export function DashboardShell({
       <aside
         className={`sidebar flex flex-col border-r border-r-border py-0 px-[8px] min-h-0 overflow-y-auto overflow-x-hidden pointer-fine:overscroll-y-none max-[740px]:hidden ${navigationClass} ${collapsed ? collapsedClass : ""}`}
       >
-        <div className="sidebar-header flex items-center gap-1 min-h-12 shrink-0">
+        <div
+          className={`sidebar-header flex items-center gap-1 min-h-12 shrink-0 ${collapsed ? insetTitlebarCollapsedHeaderClass : insetTitlebarHeaderClass}`}
+        >
           {medium ? (
             <button
               type="button"
@@ -140,14 +170,17 @@ export function DashboardShell({
           {footer}
         </div>
       </aside>
-      <main
-        id="main"
-        className="main flex flex-col overflow-y-auto pointer-fine:overscroll-y-none min-w-0 min-h-0 max-[740px]:pt-[env(safe-area-inset-top)]"
-        tabIndex={-1}
-      >
-        {children}
-        <div className="hidden max-[740px]:block h-20 shrink-0" aria-hidden />
-      </main>
+      <div className="flex flex-col min-w-0 min-h-0">
+        <div aria-hidden className={insetTitlebarStripClass} />
+        <main
+          id="main"
+          className="main flex flex-col flex-1 overflow-y-auto pointer-fine:overscroll-y-none min-w-0 min-h-0 max-[740px]:pt-[env(safe-area-inset-top)]"
+          tabIndex={-1}
+        >
+          {children}
+          <div className="hidden max-[740px]:block h-20 shrink-0" aria-hidden />
+        </main>
+      </div>
       <Dialog open={menuOpen} onOpenChange={setMenuOpen}>
         <DialogTrigger asChild>
           <button

@@ -1,5 +1,8 @@
-/** Isolated, script-free status documents shown before the local server is ready. */
-const statusUrl = (title: string, detail: string) =>
+/**
+ * Isolated, script-free status documents shown before the local server is ready. Under an inset
+ * title bar (macOS) the window has no title bar to drag, so the whole page moves it.
+ */
+const statusUrl = (title: string, detail: string) => (insetTitlebar: boolean) =>
   `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -9,6 +12,7 @@ const statusUrl = (title: string, detail: string) =>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
+  ${insetTitlebar ? "html { -webkit-app-region: drag; }" : ""}
   main { text-align: center; padding: 32px; }
   h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin: 0 0 10px; }
   p { font-size: 14px; margin: 0; opacity: 0.65; }

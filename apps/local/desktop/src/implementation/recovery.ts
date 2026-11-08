@@ -138,7 +138,14 @@ const escape = (value: string) =>
 /** What the server or the migration said, at most this many characters from its end. */
 const messageLimit = 2000;
 
-export const recoveryUrl = (recovery: DesktopRecovery) => {
+/**
+ * Under an inset title bar (macOS) the window has no title bar to drag, so the page moves it,
+ * except its links and message, which are the only things on it to click or select.
+ */
+const insetTitlebarStyle =
+  "html { -webkit-app-region: drag; } a, pre { -webkit-app-region: no-drag; }";
+
+export const recoveryUrl = (recovery: DesktopRecovery, insetTitlebar: boolean) => {
   const { title, detail, actions } = page(recovery);
   const said = "detail" in recovery ? recovery.detail.trim().slice(-messageLimit) : "";
   const message = said === "" ? "" : `<pre>${escape(said)}</pre>`;
@@ -157,6 +164,7 @@ export const recoveryUrl = (recovery: DesktopRecovery) => {
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
+  ${insetTitlebar ? insetTitlebarStyle : ""}
   main { max-width: 440px; text-align: center; padding: 32px; }
   h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin: 0 0 10px; }
   p { font-size: 14px; line-height: 1.5; margin: 0 0 24px; opacity: 0.65; }

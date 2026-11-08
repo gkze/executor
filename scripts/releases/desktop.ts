@@ -95,8 +95,8 @@ const build = Effect.gen(function* () {
     }),
   );
   yield* run("node", ["apps/local/desktop/scripts/build.mjs", "--release"], root);
-  // The main entry and the server starter it runs in a utility process.
-  for (const entry of ["main.cjs", "starter.cjs"]) {
+  // The main entry, the server starter it runs in a utility process and the window's preload.
+  for (const entry of ["main.cjs", "starter.cjs", "preload.cjs"]) {
     yield* fs.copyFile(path.join(root, "apps/local/desktop/dist", entry), path.join(stage, entry));
     // A development override that names where updates come from must not exist in a release.
     const bundled = yield* fs.readFileString(path.join(stage, entry));
@@ -135,7 +135,7 @@ const build = Effect.gen(function* () {
     electronVersion: electron.devDependencies.electron,
     asar: true,
     npmRebuild: false,
-    files: ["main.cjs", "starter.cjs", "package.json"],
+    files: ["main.cjs", "starter.cjs", "preload.cjs", "package.json"],
     extraResources: [
       { from: runtime, to: "runtime" },
       // electron-builder deliberately omits a matcher's root node_modules.

@@ -428,7 +428,7 @@ export const approval = (name: string) =>
  * Wrap a router expression with the tool rules: renamed and left out by `exposedName`, then each
  * tool's approval, falling back to `defaultRule`.
  */
-const ruled = (router: string, rules: boolean, defaultRule: string) =>
+export const ruled = (router: string, rules: boolean, defaultRule: string) =>
   rules
     ? `withApprovals(renameTools(${router}, exposedName), (tool, name) => approval(name) ?? (${defaultRule}))`
     : `withApprovals(${router}, (tool) => (${defaultRule}))`;

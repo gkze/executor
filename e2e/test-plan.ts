@@ -1787,6 +1787,18 @@ export const scenarios = plan({
       "self-host": na("Local Executor 1 import"),
     },
   },
+  localStdioMcpBridge: {
+    // The CLI starts the background Executor that runs the command.
+    fixtures: "cli",
+    file: "local-stdio-mcp.spec.ts",
+    title:
+      "executor import-v1 turns an Executor 1 stdio MCP server into an app whose command the background Executor runs once and serves only to that app's token",
+    targets: {
+      local: scheduled,
+      cloud: na("Local stdio MCP servers"),
+      "self-host": na("Local stdio MCP servers"),
+    },
+  },
   localServiceSharedStart: {
     // The CLI starts and stops its own servers; an outer managed server would compete with them.
     fixtures: "cli",

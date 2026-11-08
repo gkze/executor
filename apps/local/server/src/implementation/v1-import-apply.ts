@@ -3,6 +3,8 @@
  * data. Each integration becomes the app the shared v1 import generates, with Executor 1's tool
  * policies as its approval rules; each connection an account holding its `auth.json` credential,
  * linked for the person; and fixed credentials in an integration's configuration one more account.
+ * A local (stdio) MCP server becomes an app whose command this Executor's local server runs, given
+ * to it again on every run.
  *
  * A record in the data directory (`v1-import.json`) says what each item became, so running the
  * import again moves only what has not moved. Before each app or account is made, the record
@@ -54,6 +56,8 @@ import {
 import { linkAccount, linkedAccounts } from "./app-accounts.ts";
 import { writeAtomically } from "./atomic-file.ts";
 import { localOwner } from "./owners.ts";
+import { stdioAccount, type StdioCommand } from "../contracts/stdio-mcp.ts";
+import type { StdioMcp } from "./stdio-mcp.ts";
 import {
   followIntegration,
   generateApp,
@@ -131,6 +135,23 @@ const rerunDecision = (
 const sourceHash = (files: SourceFiles) =>
   createHash("sha256").update(JSON.stringify(files)).digest("hex");
 
+/**
+ * A local (stdio) server's command, as this Executor runs it: Executor 1's, found on the importing
+ * command's `PATH` (`path`) unless Executor 1 set one or the command sent none.
+ */
+const stdioCommand = (
+  server: Pick<StdioCommand, "command" | "args" | "env"> & { readonly cwd: string | undefined },
+  path: string | undefined,
+): StdioCommand => ({
+  command: server.command,
+  args: server.args,
+  env:
+    path === undefined || Object.hasOwn(server.env, "PATH")
+      ? server.env
+      : { ...server.env, PATH: path },
+  ...(server.cwd === undefined ? {} : { cwd: server.cwd }),
+});
+
 /** The background Executor's import: one request at a time, each a few integrations. */
 export const makeV1Import = (input: {
   readonly executor: Executor;
@@ -138,6 +159,7 @@ export const makeV1Import = (input: {
   readonly directory: string;
   readonly platform: string;
   readonly http: HttpClient.HttpClient;
+  readonly stdio: Pick<StdioMcp, "attach">;
 }) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -262,9 +284,15 @@ export const makeV1Import = (input: {
     /**
      * The integration's app, decided by `rerunDecision`. A new version that would take another
      * provider's accounts than the ones linked to the app is not deployed: those accounts would no
-     * longer fit it.
+     * longer fit it. A local (stdio) server's app is then given its command (`attach`), unless the
+     * version it runs no longer calls the local server, which the person chose.
      */
-    const ensureApp = (workspace: V1Workspace, integration: IntegrationRow, ledger: LedgerOf) =>
+    const ensureApp = (
+      workspace: V1Workspace,
+      integration: IntegrationRow,
+      ledger: LedgerOf,
+      path: string | undefined,
+    ) =>
       Effect.gen(function* () {
         const generated = yield* generateApp(workspace, integration);
         const { files, note } = generated.generated;
@@ -318,7 +346,20 @@ export const makeV1Import = (input: {
           });
           return { app: next, notes: [note] };
         });
-        const text = deployed.notes.filter((part) => part !== undefined).join(" ");
+        const notes: Array<string | undefined> = [...deployed.notes];
+        if (generated.decoded.plugin === "stdio") {
+          if (deployed.app.requirements.accounts[stdioAccount.requirement] === undefined)
+            notes.push(
+              "Its version does not call the local server this Executor runs, so its command was not given to it.",
+            );
+          else
+            yield* input.stdio.attach(
+              deployed.app,
+              integrationLabel(integration),
+              stdioCommand(generated.decoded.server, path),
+            );
+        }
+        const text = notes.filter((part) => part !== undefined).join(" ");
         return {
           app: deployed.app,
           planned: generated.planned,
@@ -447,6 +488,7 @@ export const makeV1Import = (input: {
       workspace: V1Workspace,
       ledger: LedgerOf,
       integration: IntegrationRow,
+      path: string | undefined,
     ) =>
       Effect.gen(function* () {
         const planned = planIntegration(integration);
@@ -462,7 +504,7 @@ export const makeV1Import = (input: {
           ...connections.map((connection) => followIntegration(connection.item, result(item))),
         ];
         if (planned.outcome !== "moves") return { result: result(planned), items: gone(planned) };
-        const app = yield* settle(ensureApp(workspace, integration, ledger));
+        const app = yield* settle(ensureApp(workspace, integration, ledger, path));
         if (!app.ok) {
           const refusedItem = { ...planned, ...app.decided };
           return { result: result(refusedItem), items: gone(refusedItem) };
@@ -523,7 +565,12 @@ export const makeV1Import = (input: {
                 });
                 continue;
               }
-              const imported = yield* importIntegration(workspace, ledger, integration);
+              const imported = yield* importIntegration(
+                workspace,
+                ledger,
+                integration,
+                request.path,
+              );
               results.set(slug, imported.result);
               items.push(...imported.items);
             }

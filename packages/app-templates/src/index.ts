@@ -2,6 +2,7 @@
 export { TemplateError, TemplateErrorCode } from "./contracts/templates.ts";
 export {
   generateMcpSource,
+  hostBridgedMcpSource,
   type McpSourceAccess,
   type McpSourceOptions,
 } from "./implementation/mcp.ts";

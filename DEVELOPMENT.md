@@ -13,7 +13,10 @@ Provider OAuth supports supplied clients, DCR, CIMD, and token refresh.
 Outbound MCP works over HTTP/SSE on local, self-host and cloud: custom remote
 MCP imports and catalog MCP entries deploy, discover live upstream tools, and
 call them, verified end to end including a real public server. Apps cannot
-start local processes, so stdio MCP servers are not supported. The remote SDK facade
+start local processes. On local, `executor import-v1` brings Executor 1's stdio MCP
+servers across: the local server keeps each command, runs it, and serves it to its app
+over loopback (`apps/local/server/src/implementation/stdio-mcp.ts`). Cloud and self-host
+do not run stdio servers. The remote SDK facade
 (`createRemoteExecutor`) is not implemented.
 
 Effect is pinned to an upstream snapshot with MCP `2026-07-28` support.

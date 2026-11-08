@@ -103,6 +103,8 @@ export const importV1 = <E, R>(
     const workspaces: V1ImportWorkspace[] = [];
     let failure: Option.Option<Effect.Error<ReturnType<typeof client.v1Import.run>>> =
       Option.none();
+    // A local (stdio) server's command is found on this shell's PATH, when it has one.
+    const path = process.env.PATH;
     for (const workspace of plan) {
       const integrations = workspace.items.filter((item) => item.kind === "integration");
       const answers: V1ImportItem[] = [];
@@ -121,6 +123,7 @@ export const importV1 = <E, R>(
               from,
               workspace: workspace.tenant,
               integrations: batch.map((item) => item.id),
+              ...(path === undefined || path === "" ? {} : { path }),
             },
           })
           .pipe(Effect.result);

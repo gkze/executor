@@ -105,7 +105,9 @@ writes nothing. `--json` prints the report for programs.
 Each integration becomes an app, generated as Executor Cloud's import generates it,
 with your Executor 1 tool policies as its approval rules. Each connection becomes an
 account holding its saved credential, linked to that app for you. Local Executor has
-no organization, so a workspace connection becomes your account too.
+no organization, so a workspace connection becomes your account too. A local (stdio)
+MCP server becomes an app whose command the background Executor runs, found on the
+`PATH` of the shell you ran the import from unless Executor 1 set one.
 
 The background Executor runs the import, a few integrations at a time, and the
 report shows what it did with each item. It records what each item became in
@@ -120,7 +122,7 @@ shows what moved before it stopped and the command fails; run it again to contin
 | --- | --- |
 | Moves | It becomes an app, account or approval rule, with its saved credential. |
 | Moves without its credential | Executor 1 kept the credential somewhere the import does not read, such as 1Password. Connect the account again afterwards. |
-| Cannot move | Executor 2 cannot take it as it is, for the reason shown: for example a local (stdio) MCP server, which Executor 2's apps cannot start, or an app whose generated source does not build. Running the import again gives the same answer until what the reason names changes. |
+| Cannot move | Executor 2 cannot take it as it is, for the reason shown: for example a local (stdio) MCP server that takes credentials in environment variables or runs through Executor 1's Codex app-server adapter, or an app whose generated source does not build. Running the import again gives the same answer until what the reason names changes. |
 | Skipped | Executor 1 could not run it either, such as a connection whose credential is no longer in `auth.json`. |
 | Failed | Something that may clear up stopped it, such as a service that did not respond. Running the import again tries it again. |
 

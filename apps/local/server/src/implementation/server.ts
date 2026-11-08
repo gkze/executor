@@ -69,6 +69,7 @@ import type { LocalServerOptions } from "../contracts/server.ts";
 import type { ServerConfig } from "../contracts/config.ts";
 import { openStorage } from "./storage.ts";
 import { installExecutorApp } from "./executor-app.ts";
+import { makeStdioMcp, type StdioMcp } from "./stdio-mcp.ts";
 import { localSkills } from "./app-browser.ts";
 import { localMcp } from "./mcp.ts";
 import { dashboard } from "./dashboard.ts";
@@ -163,7 +164,10 @@ export const localApi = (
       const evaluation = yield* declarationConfig;
       // MCP grants are checked again before each event delivery; OAuth starts after the executor.
       const grants = yield* Deferred.make<LocalMcpOAuth>();
-      const executor = yield* createExecutor({
+      // The local MCP servers an app ran are forgotten once its removal commits. The bridge starts
+      // after the executor; a removal before that is caught by its startup reconcile.
+      const removedApp = yield* Ref.make<Option.Option<StdioMcp["forget"]>>(Option.none());
+      const sdk = yield* createExecutor({
         database: storage,
         secret: config.encryptionKey,
         origin: config.webhookOrigin ?? config.browserOrigin ?? `http://localhost:${config.port}`,
@@ -195,6 +199,25 @@ export const localApi = (
             : { clientMetadataUrl: config.oauthClientMetadataUrl }),
         },
       }).pipe(startupPhase("sdk"));
+      const executor: typeof sdk = {
+        ...sdk,
+        apps: {
+          ...sdk.apps,
+          remove: (input) =>
+            sdk.apps.remove(input).pipe(
+              Effect.tap(() =>
+                Ref.get(removedApp).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: () => Effect.void,
+                      onSome: (forget) => forget(input.app),
+                    }),
+                  ),
+                ),
+              ),
+            ),
+        },
+      };
       yield* Deferred.succeed(ready, executor);
       const analytics = yield* localAnalytics({
         directory,
@@ -263,6 +286,16 @@ export const localApi = (
         ? scheduler
         : scheduler.pipe(Effect.provideService(ScheduleObservation, scheduleAnalytics(analytics)));
       const managed = yield* installExecutorApp(executor, sql, config);
+      // Local (stdio) MCP servers this process runs for their apps; their accounts follow the port and key.
+      const stdio = yield* makeStdioMcp({
+        executor,
+        sql,
+        directory,
+        platform: process.platform,
+        config,
+      });
+      yield* Ref.set(removedApp, Option.some(stdio.forget));
+      yield* stdio.reconcile;
       const access = HttpRouter.middleware((httpEffect) =>
         Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest;
@@ -309,6 +342,7 @@ export const localApi = (
         directory,
         platform: process.platform,
         http: httpClient,
+        stdio,
       });
       const programmatic = Layer.mergeAll(
         HttpRouter.add(
@@ -499,6 +533,7 @@ export const localApi = (
         HttpRouter.add("POST", "/dashboard/api/telemetry/logs", browserTelemetry(config, "logs")),
         programmatic,
         HttpRouter.add("*", "/mcp", mcp.http),
+        HttpRouter.add("*", "/stdio-mcp/:id/mcp", stdio.http),
         HttpRouter.add("*", "/api/auth/*", oauth.handler),
         HttpRouter.add("GET", "/.well-known/oauth-protected-resource", oauth.protectedResource),
         HttpRouter.add("GET", "/.well-known/oauth-protected-resource/mcp", oauth.protectedResource),

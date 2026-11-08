@@ -142,6 +142,12 @@ export const V1ImportRequest = Schema.Struct({
   workspace: Schema.String,
   /** The integrations' slugs. */
   integrations: Schema.Array(Schema.String),
+  /**
+   * The command's own `PATH`, which a local (stdio) server's command is found on unless Executor 1
+   * set one. The background server may run with a shorter one, as a login service does. Absent
+   * when the command has none, which leaves the server's own.
+   */
+  path: Schema.optionalKey(Schema.NonEmptyString),
 });
 export type V1ImportRequest = typeof V1ImportRequest.Type;
 

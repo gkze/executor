@@ -410,12 +410,8 @@ layer(TestLive, { excludeTestServices: true })("Local Executor 1 import", (it) =
           expect(item("petStore")).toMatchObject({ kind: "integration", outcome: "moves" });
           expect(item("conn_pets")).toMatchObject({ outcome: "moves" });
           expect(item("conn_calendar")).toMatchObject({ outcome: "moves" });
-          // A local (stdio) MCP server cannot run here: apps cannot start local processes.
-          expect(item("shell")).toMatchObject({
-            kind: "integration",
-            outcome: "cannot_move",
-            category: "local_server",
-          });
+          // A local (stdio) MCP server moves: this Executor's local server runs its command.
+          expect(item("shell")).toMatchObject({ kind: "integration", outcome: "moves" });
           expect(item("petsApi")).toMatchObject({
             outcome: "cannot_move",
             reason: "v1 stored no resolved specification for it.",
@@ -433,8 +429,8 @@ layer(TestLive, { excludeTestServices: true })("Local Executor 1 import", (it) =
           });
           expect(item("conn_vault")).toMatchObject({ outcome: "reconnect" });
           expect(item("conn_vault")?.reason).toContain("1Password");
-          // A connection of an integration that cannot move goes with it.
-          expect(item("conn_shell")).toMatchObject({ outcome: "cannot_move" });
+          // A stdio server's connection holds nothing to copy and moves with its integration.
+          expect(item("conn_shell")).toMatchObject({ outcome: "moves" });
           expect(item("ask-before-delete")).toMatchObject({
             kind: "tool_policy",
             integration: "Notes MCP",
@@ -467,7 +463,7 @@ layer(TestLive, { excludeTestServices: true })("Local Executor 1 import", (it) =
           expect(text.code, text.stderr).toBe(0);
           expect(text.stdout).toContain(`Workspace ${work}`);
           expect(text.stdout).toContain(
-            "Connections: 3 move, 2 move without their credential, 1 cannot move, 1 skipped",
+            "Connections: 4 move, 2 move without their credential, 1 skipped",
           );
           expect(text.stdout).toContain("Notes MCP / vault: Its credential is kept in 1Password");
           expect(text.stdout).toContain("Nothing was written. Run without --dry-run to import.");
@@ -526,11 +522,12 @@ layer(TestLive, { excludeTestServices: true })("Local Executor 1 import", (it) =
             expect(item(id), id).toMatchObject({ outcome: "moves", v2Id: expect.any(String) });
           expect(item("conn_lost")).toMatchObject({ outcome: "skipped" });
           expect(item("conn_vault")).toMatchObject({ outcome: "reconnect" });
-          expect(item("shell")).toMatchObject({ outcome: "cannot_move" });
-          expect(item("conn_shell")).toMatchObject({ outcome: "cannot_move" });
+          expect(item("shell")).toMatchObject({ outcome: "moves", v2Id: expect.any(String) });
+          expect(item("conn_shell")).toMatchObject({ outcome: "moves" });
+          expect(item("conn_shell")).not.toHaveProperty("v2Id");
           expect(item("petsApi")).toMatchObject({ outcome: "cannot_move" });
           expect(item("pets-ask")).toMatchObject({ outcome: "moves" });
-          expect(item("shell-ask")).toMatchObject({ outcome: "cannot_move" });
+          expect(item("shell-ask")).toMatchObject({ outcome: "moves" });
           const others = report.workspaces.find((workspace) => workspace.tenant === other)?.items;
           expect(others?.map((entry) => entry.outcome)).toEqual(["moves", "moves"]);
 
@@ -628,6 +625,15 @@ layer(TestLive, { excludeTestServices: true })("Local Executor 1 import", (it) =
           expect(Object.keys(methods)).toEqual(["token"]);
           expect(methods.token?.fields.required).toHaveLength(2);
           expect(methods.token?.fields.required).toContain("token");
+
+          // A local server's rule is its app's own, as any MCP server's is, beside the endpoint
+          // the local server runs it at.
+          const shellSource = yield* read(`/v1/apps/${item("shell")?.v2Id}/source`);
+          const shellFiles = (shellSource.json as { files: { path: string; content: string }[] })
+            .files;
+          expect(shellFiles.find((file) => file.path === "tools.ts")?.content).toContain(
+            `"run": "always"`,
+          );
 
           // The person deploys their own version of the pet store's app, and Executor 1's rules
           // change for it and for Notes MCP after the import.

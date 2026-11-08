@@ -8,7 +8,7 @@ import {
   type GeneratedToolRules,
 } from "../contracts/templates.ts";
 import { appsPeerVersion, packageFile, sourceFiles } from "./files.ts";
-import { mcpAppSource } from "./protocol-apps.ts";
+import { mcpAppSource, ruled, toolsFile } from "./protocol-apps.ts";
 
 /** The server's host, so an OAuth account's tokens are only ever sent to the server itself. */
 const credentialHost = (url: string) =>
@@ -177,3 +177,61 @@ export const provider = defineProvider({
       ]),
     };
   });
+
+/**
+ * An MCP app for a server its host runs on the app's behalf, such as a local (stdio) command the
+ * local server starts. Its one app-scope account, which the host creates and refreshes, holds the
+ * endpoint and the token for it, so the source holds no address, command or credential. Tool
+ * rules, such as an imported server's earlier approvals, go in `tools.ts` as in `mcpAppSource`;
+ * a tool they do not decide asks when the server marks it destructive.
+ */
+export const hostBridgedMcpSource = (
+  name: string,
+  account: { readonly requirement: string; readonly method: string; readonly provider: string },
+  rules?: GeneratedToolRules,
+) => {
+  const tools = toolsFile(rules);
+  const router = `await mcpRouter({
+    url: app.accounts.${account.requirement}.fields.url,
+    account: app.accounts.${account.requirement},
+    cache,
+    headers: { Authorization: "Bearer " + app.accounts.${account.requirement}.fields.token },
+    signal,
+  })`;
+  return sourceFiles([
+    {
+      path: "index.ts",
+      content: `import { defineApp, ${tools === undefined ? "" : "renameTools, "}toolAnnotations, withApprovals } from "apps"
+import { mcpRouter } from "apps/mcp"
+import { always } from "apps/operations/approval"
+import { ${account.requirement} } from "./provider.ts"
+${tools === undefined ? "" : `import { approval, exposedName } from "./tools.ts"\n`}
+// Executor runs this server for this app and keeps its endpoint in the linked account.
+export default defineApp({ app: { accounts: { ${account.requirement} } } }, async ({ app, signal, cache }) => ({
+  // Ask before running tools the server marks destructive, unless a rule in ./tools.ts decides.
+  tools: ${ruled(router, tools !== undefined, "toolAnnotations(tool)?.destructiveHint === true ? always() : undefined")},
+}))
+`,
+    },
+    ...(tools === undefined ? [] : [{ path: "tools.ts", content: tools }]),
+    {
+      path: "provider.ts",
+      content: `import { defineProvider, object, secrets, string } from "apps"
+
+/**
+ * The endpoint Executor serves this server at. Executor creates and refreshes it. A provider's id
+ * derives from its definition, so the name is this server's own: no other app's account fits it.
+ */
+export const ${account.requirement} = defineProvider({
+  name: ${JSON.stringify(account.provider)},
+  auth: {
+    ${account.method}: secrets({ label: "Endpoint", fields: object({ url: string(), token: string() }) }),
+  },
+})
+`,
+    },
+    packageFile(name, {
+      "@modelcontextprotocol/sdk": appsPeerVersion("@modelcontextprotocol/sdk"),
+    }),
+  ]);
+};

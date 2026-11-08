@@ -44,8 +44,12 @@ export interface V1ImportProduct {
     | { readonly runs: false; readonly refusal: string }
     | {
         readonly runs: true;
+        /**
+         * The app's source for one server. `tenant` and `integration` identify the v1
+         * integration, which the product can keep the server's endpoint provider apart by.
+         */
         readonly source: (
-          name: string,
+          server: { readonly name: string; readonly tenant: string; readonly integration: string },
           rules: GeneratedToolRules,
         ) => Effect.Effect<SourceFiles, TemplateError>;
       };

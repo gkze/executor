@@ -46,6 +46,8 @@ import type {
 import type { TemplateError } from "@executor-js/app-templates";
 import { Effect, FileSystem, Option, Path, Predicate, Schema, type Scope } from "effect";
 import { HttpClient } from "effect/http";
+import { StdioBridgeFailed } from "../contracts/stdio-mcp.ts";
+import { stdioAppSource } from "./stdio-mcp.ts";
 import {
   type V1ImportItem,
   type V1ImportOutcome,
@@ -62,7 +64,7 @@ const localSubject = "local";
  * in `auth.json` (its `file` provider) and offered none of Executor's own OAuth apps. It had one
  * person, so a workspace connection's account is that person's own, and its apps declare the
  * integration's sign-in methods even when no connection moves, for the person to connect later.
- * It ran local (stdio) MCP servers itself, which this Executor's apps cannot start.
+ * It ran local (stdio) MCP servers itself, which this Executor's local server runs for their apps.
  */
 export const localProduct: V1ImportProduct = {
   credentialProvider: "file",
@@ -72,11 +74,7 @@ export const localProduct: V1ImportProduct = {
   callback: "http://localhost:4788/api/oauth/callback",
   orgAccounts: "personal",
   declaredMethods: true,
-  localServers: {
-    runs: false,
-    refusal:
-      "Local (stdio) MCP servers cannot run in this Executor: its apps cannot start local processes.",
-  },
+  localServers: { runs: true, source: stdioAppSource },
   wording: {
     product: "this Executor",
     destination: "this Executor",
@@ -368,7 +366,8 @@ const labelOf = (rows: V1Rows, slug: string) => {
 };
 
 /**
- * What an integration becomes, from its row alone: an app generated from it.
+ * What an integration becomes, from its row alone: an app generated from it. A local (stdio) MCP
+ * server's app calls the command this Executor's local server runs for it.
  */
 export const planIntegration = (row: IntegrationRow): V1ImportItem => ({
   kind: "integration",
@@ -490,6 +489,10 @@ const decideFailure = (error: unknown): Decided => {
       : error.stale !== undefined
         ? { outcome: "skipped", reason: error.reason, category: error.stale }
         : { outcome: "cannot_move", reason: error.reason };
+  // The import gives a command only to a version that takes the endpoint, so what can fail here
+  // is recording it.
+  if (error instanceof StdioBridgeFailed)
+    return { outcome: "failed", reason: "This Executor could not record its local server." };
   const tag = Predicate.hasProperty(error, "_tag") ? error._tag : undefined;
   return isKnownFailure(tag)
     ? failures[tag]

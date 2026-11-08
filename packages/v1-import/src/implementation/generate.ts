@@ -1264,7 +1264,7 @@ export const generate = <E>(
         // The product runs the command and keeps it; the app holds only v1's rules for its tools.
         const { rules, decided, note } = yield* mcpRules;
         return {
-          files: yield* decoded.source(name, rules),
+          files: yield* decoded.source({ name, tenant, integration: integration.row_id }, rules),
           note,
           health: { kind: "none" as const },
           ...left,

@@ -34,6 +34,7 @@
     "@executor-js/telemetry": "workspace:*",
     "@executor-js/utils": "workspace:*",
     "@executor-js/v1-import": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@napi-rs/keyring": "2.1.0",
     "apps": "workspace:*",
     "better-auth": "1.7.16",
@@ -42,7 +43,6 @@
     "proper-lockfile": "4.1.2"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
     "@types/proper-lockfile": "4.1.4",
     "graphql": "16.11.0",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.3"

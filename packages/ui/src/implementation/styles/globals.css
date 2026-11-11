@@ -4,6 +4,18 @@
 @source "../../../../devtools/src";
 @source "../../../../dashboard-start/src/implementation/build-change-notice.tsx";
 
+/* `dark:` follows the same theme as the tokens: an explicit `data-theme`, else the system. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme]), :root:not([data-theme]) *) {
+      @slot;
+    }
+  }
+}
+
 /* Executor's product tokens and bundled Geist faces. Dashboards preload the faces; a face that
    misses the first paint is not swapped in, so late fonts never move text. */
 @font-face {
@@ -46,37 +58,29 @@
   --radius-md: 6px;
   --radius-lg: 8px;
 }
+/* The theme comes from `data-theme` on the root, or the system appearance without it (see
+   `contracts/theme.ts`). `color-scheme` picks each token's `light-dark()` side, along with native
+   controls and scrollbars. */
 :root {
-  color-scheme: light;
-  --background: #fff;
-  --foreground: #111;
-  --primary: #0a0a0a;
-  --primary-foreground: #fff;
-  --muted: #fafafa;
-  --muted-foreground: #666;
-  --accent: #f5f5f5;
-  --destructive: #b4261a;
-  --border: #eaeaea;
-  --input: #d4d4d4;
-  --ring: #888;
-  --sign-in-warning: #99651a;
+  color-scheme: light dark;
+  --background: light-dark(#fff, #0a0a0a);
+  --foreground: light-dark(#111, #ededed);
+  --primary: light-dark(#0a0a0a, #fff);
+  --primary-foreground: light-dark(#fff, #0a0a0a);
+  --muted: light-dark(#fafafa, #111);
+  --muted-foreground: light-dark(#666, #9a9a9a);
+  --accent: light-dark(#f5f5f5, #1a1a1a);
+  --destructive: light-dark(#b4261a, #e0726a);
+  --border: light-dark(#eaeaea, #242424);
+  --input: light-dark(#d4d4d4, #333);
+  --ring: light-dark(#888, #777);
+  --sign-in-warning: light-dark(#99651a, #d6aa65);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --primary: #fff;
-    --primary-foreground: #0a0a0a;
-    --muted: #111;
-    --muted-foreground: #9a9a9a;
-    --accent: #1a1a1a;
-    --destructive: #e0726a;
-    --border: #242424;
-    --input: #333;
-    --ring: #777;
-    --sign-in-warning: #d6aa65;
-  }
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 @layer base {
   * {

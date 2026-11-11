@@ -43,7 +43,7 @@ export function Code({
           : code.split("\n")
         ).map((line, i) => (
           <span
-            className="code-line inline [@media(prefers-color-scheme:_dark)]:[&_span[style]]:text-[color:var(--shiki-dark)]!"
+            className="code-line inline dark:[&_span[style]]:text-[color:var(--shiki-dark)]!"
             key={i}
           >
             {lineNumbers && (

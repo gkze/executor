@@ -2617,6 +2617,16 @@ export const scenarios = plan({
       local: na("Shared tool browser exercised through hosted account links."),
     },
   },
+  themeChoice: {
+    fixtures: "actors",
+    file: "theme.spec.ts",
+    title: "Theme menu overrides the system appearance and keeps the choice across documents",
+    targets: {
+      "self-host": scheduled,
+      cloud: na("Cloud renders the same shared dashboard document and shell as self-host."),
+      local: na("Local renders the same shared dashboard document and shell as self-host."),
+    },
+  },
   emptyStateMcp: {
     fixtures: "actors",
     file: "empty-state-mcp.spec.ts",

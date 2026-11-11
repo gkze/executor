@@ -18,6 +18,7 @@ import type { CatalogIcon } from "@executor-js/catalog/contracts";
 import { Input } from "@executor-js/ui/components/input";
 import { cn } from "@executor-js/ui/lib/utils";
 import { Skeleton } from "../components/skeleton.tsx";
+import { darkThemeMedia, useTheme } from "../hooks/theme.ts";
 const noIcons = Atom.make(noCatalogIcons);
 
 /** The dashboard's catalog icons, or none outside a dashboard. */
@@ -69,6 +70,7 @@ export function ProviderIcon({
   readonly pending?: boolean;
 }) {
   const catalogIcons = useCatalogIcons();
+  const [theme] = useTheme();
   const [failed, setFailed] = useState<readonly string[]>([]);
   const normalized = name.toLowerCase().trim();
   // Fetched large enough to stay sharp in the biggest tile on a 2x screen.
@@ -94,12 +96,13 @@ export function ProviderIcon({
       aria-hidden
     >
       {own ? (
-        // The browser picks the variant for the color scheme, so the server renders the same
-        // markup. A srcset ends a URL at whitespace, which a data URI may hold escaped.
+        // The browser picks the variant for the theme, so the server renders the same markup; a
+        // saved theme override takes effect once the page hydrates. A srcset ends a URL at
+        // whitespace, which a data URI may hold escaped.
         <picture className="contents">
           {own.dark !== own.light && (
             <source
-              media="(prefers-color-scheme: dark)"
+              media={darkThemeMedia(theme)}
               srcSet={own.dark.replace(/\s/gu, encodeURIComponent)}
             />
           )}

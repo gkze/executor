@@ -3,6 +3,7 @@
 import { HeadContent, Scripts } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { DisplayFormatSync } from "@executor-js/ui/hooks/display-format";
+import { applySavedThemeScript } from "@executor-js/ui/contracts/theme";
 import type {} from "../contracts/build.ts";
 import { documentBuild } from "./document-build.ts";
 import { BuildChangeNotice } from "./build-change-notice.tsx";
@@ -43,11 +44,13 @@ const holdEarlySubmissions = `(() => {
 /** Public build metadata read by browser telemetry; it carries no identity or configuration secrets. */
 export function DashboardDocument({ children }: { readonly children: ReactNode }) {
   return (
-    // `data-dashboard` lets automation tell dashboard documents from authored app pages.
-    <html lang="en" data-dashboard="">
+    // `data-dashboard` lets automation tell dashboard documents from authored app pages. The saved
+    // theme script sets `data-theme` before hydration, which React would otherwise report.
+    <html lang="en" data-dashboard="" suppressHydrationWarning>
       <head>
         <meta charSet="UTF-8" />
         <meta name="color-scheme" content="light dark" />
+        <script dangerouslySetInnerHTML={{ __html: applySavedThemeScript }} />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
         <meta name="executor-build" content={documentBuild()} />
         <meta

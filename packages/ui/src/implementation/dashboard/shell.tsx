@@ -2,13 +2,25 @@ import { useState, type ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   BookOpen01Icon,
+  ComputerIcon,
   Menu01Icon,
   Message01Icon,
+  Moon02Icon,
   SidebarLeft01Icon,
   StarIcon,
+  Sun03Icon,
 } from "@hugeicons/core-free-icons";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "../components/dialog.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "../components/dropdown-menu.tsx";
 import { useMediaQuery } from "../hooks/media-query.ts";
+import { useTheme } from "../hooks/theme.ts";
+import { isTheme, type Theme } from "../../contracts/theme.ts";
 
 /** The public issue tracker, shared by the Feedback link and the support channels. */
 export const issuesUrl = "https://github.com/UsefulSoftwareCo/executor/issues";
@@ -66,7 +78,62 @@ const insetTitlebarCollapsedHeaderClass =
 const insetTitlebarStripClass =
   "hidden [[data-desktop-titlebar]_&]:block shrink-0 h-3 max-[740px]:h-[var(--desktop-controls-bottom)] [-webkit-app-region:drag]";
 
-/** Links and the optional support trigger share one compact style. */
+const themes = [
+  { value: "system", label: "System", icon: ComputerIcon },
+  { value: "light", label: "Light", icon: Sun03Icon },
+  { value: "dark", label: "Dark", icon: Moon02Icon },
+] as const satisfies readonly {
+  readonly value: Theme;
+  readonly label: string;
+  readonly icon: unknown;
+}[];
+
+/** Chooses the color theme; the trigger shows the current choice's icon. */
+function ThemeMenu() {
+  const [theme, setTheme] = useTheme();
+  const current = themes.find((option) => option.value === theme) ?? themes[0];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="theme-menu-trigger hover:text-foreground" title="Theme">
+          <HugeiconsIcon icon={current.icon} strokeWidth={2} size={13} aria-hidden />
+          <span>Theme</span>
+        </button>
+      </DropdownMenuTrigger>
+      {/* Styled like the organization and account menus below it in the sidebar. */}
+      <DropdownMenuContent
+        className="w-44 max-w-[calc(100vw-24px)] rounded-lg p-0 shadow-[0_8px_24px_#0003]"
+        side="top"
+        sideOffset={6}
+        align="start"
+        collisionPadding={12}
+        aria-label="Theme"
+        loop
+      >
+        <DropdownMenuRadioGroup
+          className="p-[5px]"
+          value={theme}
+          onValueChange={(value) => {
+            if (isTheme(value)) setTheme(value);
+          }}
+        >
+          {themes.map(({ value, label, icon }) => (
+            <DropdownMenuRadioItem
+              key={value}
+              value={value}
+              className="min-h-[38px] cursor-pointer py-1.5 pr-8 pl-2 text-[13px] [&>[data-slot=dropdown-menu-item-indicator]]:right-2 [&>[data-slot=dropdown-menu-item-indicator]]:left-auto"
+            >
+              <HugeiconsIcon icon={icon} strokeWidth={2} size={16} aria-hidden />
+              {label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Links, the optional support trigger and the theme menu share one compact style. */
 function ResourceLinks({
   docsUrl,
   support,
@@ -83,6 +150,7 @@ function ResourceLinks({
         </a>
       ))}
       {support}
+      <ThemeMenu />
     </div>
   );
 }

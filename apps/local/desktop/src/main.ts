@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { rotatingJsonLogger } from "@executor-js/telemetry/files";
+import { parseTheme, themeCookie } from "@executor-js/ui/contracts/theme";
 import { startProcessMetrics } from "@executor-js/telemetry/process";
 import {
   Cause,
@@ -84,8 +85,38 @@ const dashboardAttempts = 3;
 const dashboardLoadTimeout = Duration.seconds(30);
 const dashboardRetryDelay = Duration.seconds(2);
 
-/** The dashboard's `--background` token for the system appearance, painted before content loads. */
+/** The dashboard's `--background` token for the current theme, painted before content loads. */
 const windowBackground = () => (nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
+
+/**
+ * The dashboard saves the reader's theme in a cookie (see `@executor-js/ui/contracts/theme`), and
+ * the app's own appearance follows it: the window background, its startup, recovery and settings
+ * pages, and native menus and dialogs. Electron reports the chosen appearance to every page as
+ * `prefers-color-scheme`, so those pages need no changes of their own.
+ */
+const followSavedTheme = (browserSession: Electron.Session) =>
+  Effect.gen(function* () {
+    // An unreadable cookie store leaves the appearance as it was, and says so.
+    const apply = Effect.tryPromise(() => browserSession.cookies.get({ name: themeCookie })).pipe(
+      Effect.flatMap((cookies) =>
+        Effect.sync(() => {
+          nativeTheme.themeSource = parseTheme(cookies[0]?.value);
+        }),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Desktop could not read the saved theme", cause),
+      ),
+    );
+    yield* apply;
+    const run = yield* FiberSet.makeRuntime<never>();
+    const onChange = (_event: Electron.Event, cookie: Electron.Cookie) => {
+      if (cookie.name === themeCookie) run(apply);
+    };
+    browserSession.cookies.on("changed", onChange);
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => browserSession.cookies.removeListener("changed", onChange)),
+    );
+  });
 
 /**
  * On macOS the window hides its title bar and macOS draws the window controls over the page.
@@ -247,6 +278,8 @@ const desktop = Effect.gen(function* () {
     catch: () => new DesktopFailed({ stage: "window" }),
   });
   const browserSession = session.fromPartition("executor-desktop");
+  // Before the first window, which paints the theme's background as it opens.
+  yield* followSavedTheme(browserSession);
   // The app's own menu is in place before its first window opens. Until the desktop is set up it
   // has none of the desktop's items, which need its data.
   Menu.setApplicationMenu(applicationMenu({ file: [], updates: [], help: [] }));

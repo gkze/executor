@@ -40,6 +40,7 @@ layer(HostedLive, { excludeTestServices: true })("OAuth compatibility", (it) => 
           registrationError: "invalid_client_metadata",
           omitSecretExpiry: false,
           issuePublicClients: false,
+          publicClientSecret: "omitted",
           malformedRegistration: false,
           scopes: ["read"],
           includeIdToken: false,
@@ -59,6 +60,7 @@ layer(HostedLive, { excludeTestServices: true })("OAuth compatibility", (it) => 
             | "invalid_request";
           readonly omitSecretExpiry: boolean;
           readonly issuePublicClients: boolean;
+          readonly publicClientSecret: "omitted" | "empty" | "null";
           readonly malformedRegistration: boolean;
           readonly scopes: readonly string[];
           readonly includeIdToken: boolean;
@@ -83,6 +85,20 @@ layer(HostedLive, { excludeTestServices: true })("OAuth compatibility", (it) => 
           },
           // Vercel answers a client_secret_basic registration with a public client.
           { ...valid, name: "Public client issued", issuePublicClients: true },
+          // Ramp's MCP registers a public client and answers `"client_secret": ""`, HTTP 200.
+          {
+            ...valid,
+            name: "Public client with empty secret",
+            registrationStatus: 200,
+            issuePublicClients: true,
+            publicClientSecret: "empty",
+          },
+          {
+            ...valid,
+            name: "Public client with null secret",
+            issuePublicClients: true,
+            publicClientSecret: "null",
+          },
           // Executor uses only the access token and ignores any ID token, so none of these
           // can fail a sign-in, and a service may omit the ID token after `openid`.
           { ...valid, name: "ES256 OIDC", scopes: ["openid", "read"], includeIdToken: true },

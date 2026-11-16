@@ -706,7 +706,12 @@ const clientAuth = (client: OAuthRegistration) => {
   }
 };
 
-/** Fill a missing client_secret_expires_at with RFC 7591's "does not expire" value. */
+/**
+ * Normalize two registration answers that oauth4webapi rejects but RFC 7591 section 3.2.1 means
+ * plainly. A `client_secret` of `""` or `null` is no secret: Ramp registers a public client and
+ * answers `"client_secret": ""`. A secret without `client_secret_expires_at` does not expire (0).
+ * A confidential registration left without a secret still fails to decode as one.
+ */
 const registrationBody = (text: string) => {
   const parsed: unknown = (() => {
     try {
@@ -715,11 +720,13 @@ const registrationBody = (text: string) => {
       return undefined;
     }
   })();
-  return typeof parsed === "object" &&
-    parsed !== null &&
-    !Array.isArray(parsed) &&
-    typeof Reflect.get(parsed, "client_secret") === "string" &&
-    Reflect.get(parsed, "client_secret") !== "" &&
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return text;
+  const secret: unknown = Reflect.get(parsed, "client_secret");
+  if (secret === "" || secret === null)
+    return JSON.stringify(
+      Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== "client_secret")),
+    );
+  return typeof secret === "string" &&
     (Reflect.get(parsed, "client_secret_expires_at") ?? undefined) === undefined
     ? JSON.stringify({ ...parsed, client_secret_expires_at: 0 })
     : text;
@@ -1704,9 +1711,9 @@ export const makeOAuthProtocol = (options: OAuthOptions) => {
             );
             if (response.status !== 200 && response.status !== 201)
               return oauth.processDynamicClientRegistrationResponse(response);
-            // Some providers use 200 instead of RFC 7591's 201, and some issue a secret without
-            // client_secret_expires_at. Normalize only the status and that missing expiry, which
-            // RFC 7591 defines as 0 for a secret that does not expire. oauth4webapi still
+            // Some providers use 200 instead of RFC 7591's 201, send an empty secret for a public
+            // client, or issue a secret without client_secret_expires_at. Normalize only the
+            // status and those two secret fields (see registrationBody). oauth4webapi still
             // validates the content type, JSON and every other registration field.
             // The transport span retains the provider's original status.
             const text = await response.text();

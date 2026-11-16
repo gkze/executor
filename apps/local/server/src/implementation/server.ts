@@ -97,6 +97,8 @@ import { LocalExecutorApi, localManagementDocument } from "../contracts/manageme
 import { bundledGit, nativeRepositories, systemGit } from "@executor-js/app-source/node";
 import { feedbackDisabled } from "@executor-js/telemetry/product-analytics";
 import { LocalFeedbackApi } from "../contracts/feedback.ts";
+import { LocalStdioMcpApi } from "../contracts/stdio-mcp.ts";
+import { stdioMcpBridge, stdioMcpHandlers } from "./stdio-mcp.ts";
 import { localAnalytics, observeLocalExecutor, scheduleAnalytics } from "./product-analytics.ts";
 import {
   linkedOperation,
@@ -306,6 +308,7 @@ export const localApi = (
       yield* Effect.forkScoped(deliverEvents(executor));
       const mcp = yield* localMcp(sql, observed("mcp"), config.mcp, config, oauth);
       const api = observed("api");
+      const stdioMcp = yield* stdioMcpBridge(sql, config, crypto);
       // Callers never choose accounts; the served operations use the accounts linked to the app.
       const linked = linkedOperation(sql, api);
       const programmatic = Layer.mergeAll(
@@ -395,6 +398,11 @@ export const localApi = (
               ),
             ),
           ),
+        ),
+        // Adding a stdio server runs a command on this machine, so it is served only to the local
+        // API key and is not in the Executor app's tool document.
+        HttpApiBuilder.layer(LocalStdioMcpApi).pipe(
+          Layer.provide(stdioMcpHandlers(api, sql, config, crypto)),
         ),
       ).pipe(Layer.provide(access.layer));
       const signIn = yield* appAuthentication(executor, auth, config, crypto);
@@ -493,6 +501,8 @@ export const localApi = (
         HttpRouter.add("POST", "/dashboard/api/telemetry/logs", browserTelemetry(config, "logs")),
         programmatic,
         HttpRouter.add("*", "/mcp", mcp.http),
+        // Apps' stdio MCP servers; the bridge checks each server's own token.
+        HttpRouter.add("*", stdioMcp.route, stdioMcp.http),
         HttpRouter.add("GET", mcpWhoamiPath, mcp.whoami),
         HttpRouter.add("*", "/api/auth/*", oauth.handler),
         HttpRouter.add("GET", "/.well-known/oauth-protected-resource", oauth.protectedResource),

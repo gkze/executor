@@ -16,8 +16,11 @@ MCP server, use [`mcpHealth`](#check-an-mcp-account). Look up exact helper optio
 | GraphQL endpoint            | `graphqlRouter` from `apps/graphql`                       |
 | Anything else               | Queries and mutations with `fetch` ([tools.md](tools.md)) |
 
-Reach MCP servers over HTTP with `mcpRouter`. Apps cannot start local processes,
-so a stdio-only server needs an HTTP endpoint first.
+Reach MCP servers over HTTP with `mcpRouter`. Apps cannot start local processes.
+On local Executor, the person running it can add a stdio-only server with the
+local API (`POST /v1/stdio-mcp-servers`), which runs the command and deploys an
+app for it; agents cannot. Elsewhere a stdio-only server needs an HTTP endpoint
+first.
 
 ## OAuth apps the user registers
 

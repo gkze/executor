@@ -5860,6 +5860,16 @@ export const scenarios = plan({
       cloud: na("Cloud egress refuses loopback MCP hosts, so no Cloud scenario imports one."),
     },
   },
+  localStdioMcp: {
+    file: "local-stdio-mcp.spec.ts",
+    title:
+      "Local stdio MCP servers serve every call from one child with only the variables they declare",
+    targets: {
+      local: scheduled,
+      "self-host": na("Only the local server starts stdio MCP servers; hosted apps cannot."),
+      cloud: na("Only the local server starts stdio MCP servers; hosted apps cannot."),
+    },
+  },
   localOAuth: {
     file: "local-oauth.spec.ts",
     title: "Local OAuth setup checks preserve grant boundaries and complete machine accounts",

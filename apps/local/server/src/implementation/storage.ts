@@ -63,6 +63,37 @@ const appAccountLinks = Effect.gen(function* () {
 });
 
 /**
+ * The stdio MCP servers this server runs, one per app; see `stdio-mcp.ts`. `secrets` lists the
+ * names of the variables the app's account supplies; their values are never stored here.
+ * `token_digest` is the SHA-256 of the bridge token the account holds. A new table: the running
+ * server never reads it, so creating it keeps that server online.
+ *
+ * Builds of this fork from before the fork journal ran this step as step 3, `stdio_mcp_servers`, in
+ * `private_local_migrations`, so a database they opened has the table and that record. The record
+ * is removed, so upstream's own step 3 still runs there; the table is kept with its rows.
+ */
+const stdioMcpServers = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const [journal] = yield* sql<{
+    readonly exists: boolean;
+  }>`select to_regclass('private_local_migrations') is not null as exists`;
+  if (journal?.exists === true)
+    yield* sql`delete from private_local_migrations
+      where migration_id = 3 and name = 'stdio_mcp_servers'`;
+  yield* sql`create table if not exists local_stdio_mcp_servers (
+    id text primary key,
+    app text not null unique references executor_apps(id) on delete cascade,
+    command text not null,
+    args jsonb not null,
+    cwd text,
+    env jsonb not null,
+    secrets jsonb not null,
+    token_digest text not null,
+    created_at timestamp with time zone not null default now()
+  )`;
+});
+
+/**
  * Local product tables beside the SDK schema, each applied once and recorded in the same SQL
  * transaction. Append new steps; never change one that has shipped.
  */
@@ -84,6 +115,29 @@ const migrateLocalProduct = Effect.gen(function* () {
   });
 });
 
+/**
+ * This fork's own local tables, in a journal of their own. Upstream numbers the steps in
+ * `private_local_migrations`, and Effect's migrator runs only steps above the highest it recorded,
+ * so a fork step there would make a database skip upstream's step of the same number. These run
+ * after the SDK schema and before upstream's local steps, so they may use SDK tables only. Append
+ * new steps; never change one that has shipped.
+ */
+const migrateForkProduct = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  // Effect's Postgres migrator probes with ::regclass; create its journal explicitly first.
+  yield* sql`create table if not exists private_local_fork_migrations (
+    migration_id integer primary key,
+    created_at timestamp with time zone not null default now(),
+    name text not null
+  )`;
+  yield* Migrator.make({})({
+    table: "private_local_fork_migrations",
+    loader: Migrator.fromRecord({
+      "1_stdio_mcp_servers": stdioMcpServers,
+    }),
+  });
+});
+
 /** Open persistent Effect SQL resources in the host scope and preserve existing records. */
 export const openStorage = (directory: string) =>
   Effect.gen(function* () {
@@ -99,6 +153,8 @@ export const openStorage = (directory: string) =>
       Effect.provideService(SqlClient.SqlClient, sql),
     );
     yield* storage.migrate;
+    // The fork's steps first: its first step returns upstream's step 3 to databases it took it in.
+    yield* migrateForkProduct.pipe(Effect.provideService(SqlClient.SqlClient, sql));
     yield* migrateLocalProduct.pipe(Effect.provideService(SqlClient.SqlClient, sql));
     return { storage, sql };
   }).pipe(startupPhase("storage"));

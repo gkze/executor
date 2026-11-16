@@ -899,6 +899,26 @@ return await tools.executor.appAccounts.userUnlink(${at("mine", mine)});`,
         );
         expect(yield* localAccountLinks(agent, managed.id)).toEqual([["executor", account]]);
 
+        // Its code receives the local API key, so no caller may change which code it runs.
+        const files = [{ path: "index.ts", content: "export default {}" }];
+        const deployed = yield* api.request(agent, "POST", "/v1/apps/deploy", {
+          owner: "executor-local",
+          app: managed.id,
+          files,
+        });
+        expect(deployed.status, JSON.stringify(deployed.body)).toBe(404);
+        expect(deployed.body).toMatchObject({ _tag: "AppNotFound", app: managed.id });
+        const committed = yield* api.request(agent, "POST", `/v1/apps/${managed.id}/commits`, {
+          owner: "executor-local",
+          files,
+          message: "Replace the Executor app",
+        });
+        expect(committed.status).toBe(403);
+        const activated = yield* api.request(agent, "POST", `/v1/apps/${managed.id}/activate`, {
+          version: "dpl_synthetic",
+        });
+        expect(activated.status).toBe(403);
+
         // An agent's own Executor tools are refused the same way, and keep working afterwards.
         const client = yield* mcp.connect(target.apiKey, "local-managed-app-links");
         const run = (step: string, code: string) =>

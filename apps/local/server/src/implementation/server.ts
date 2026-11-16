@@ -282,10 +282,15 @@ export const localApi = (
           if (/^\/v1\/scheduled-runs\/[^/]+\/approval$/.test(target))
             return HttpServerResponse.empty({ status: 403 });
           // Product protection stays at the host boundary, not in the reusable SDK.
+          // The Executor app's code receives the local API key, so nothing but this server may
+          // change which code it runs: no commit and no activation here, and no deploy below.
           if (request.method !== "GET" && request.method !== "HEAD") {
             if (
               (request.method === "DELETE" && target === `/v1/apps/${managed.app}`) ||
-              (request.method === "PATCH" && target === `/v1/apps/${managed.app}/name`)
+              (request.method === "PATCH" && target === `/v1/apps/${managed.app}/name`) ||
+              (request.method === "POST" &&
+                (target === `/v1/apps/${managed.app}/commits` ||
+                  target === `/v1/apps/${managed.app}/activate`))
             )
               return HttpServerResponse.empty({ status: 403 });
             if (
@@ -349,10 +354,13 @@ export const localApi = (
                 },
                 create: (input) => api.apps.create({ ...input, owner: localOwner }),
                 copy: (input) => api.apps.copy({ ...input, owner: localOwner }),
+                // The Executor app is deployed only by this server; see the access rule above.
                 deploy: (input) =>
-                  api.apps.deploy(
-                    input.app === undefined ? { ...input, owner: localOwner } : input,
-                  ),
+                  input.app === managed.app
+                    ? Effect.fail(new AppNotFound({ app: input.app }))
+                    : api.apps.deploy(
+                        input.app === undefined ? { ...input, owner: localOwner } : input,
+                      ),
               },
               oauthClients: {
                 ...api.oauthClients,

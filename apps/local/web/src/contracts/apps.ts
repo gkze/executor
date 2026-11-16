@@ -4,7 +4,7 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { acknowledge, upsert } from "@executor-js/ui/contracts/mutations";
 import { DashboardClient, appAtom, overviewAtom } from "./api.ts";
 import { accountAtom } from "./accounts.ts";
-import { linkedAccountIds } from "@executor-js/ui/contracts/app-accounts";
+import { appAccountIds } from "@executor-js/ui/contracts/app-accounts";
 
 /** App metadata changes use the same live subscriptions as other SDK writes. */
 export const renameAppAtom = Atom.family((app: AppId) =>
@@ -18,9 +18,7 @@ export const renameAppAtom = Atom.family((app: AppId) =>
 /** Saved app metadata is shared immediately while stream snapshots reconcile it. */
 export function acknowledgeApp(get: Atom.FnContext, saved: App) {
   const inventory = AsyncResult.value(get(overviewAtom));
-  const accounts = Option.isSome(inventory)
-    ? linkedAccountIds(inventory.value.links, saved.id)
-    : [];
+  const accounts = Option.isSome(inventory) ? appAccountIds(inventory.value, saved.id) : [];
   acknowledge(get, appAtom(saved.id), (data) => ({ ...data, app: saved }));
   acknowledge(get, overviewAtom, (data) => ({ ...data, apps: upsert(data.apps, saved) }));
   for (const account of accounts)

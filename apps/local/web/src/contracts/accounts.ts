@@ -6,6 +6,7 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { acknowledge, acknowledgedQuery, invalidate } from "@executor-js/ui/contracts/mutations";
 import type { AccountToName } from "@executor-js/ui/dashboard/name-account";
 import type { AccountMetadataUpdate } from "@executor-js/ui/dashboard/account-description";
+import { accountAppIds } from "@executor-js/ui/contracts/app-accounts";
 import { DashboardClient, liveQueryAtom, overviewAtom, toolsAtom } from "./api.ts";
 
 export const accountAtom = Atom.family((account: AccountId) =>
@@ -106,8 +107,8 @@ export function accountCredentialsChanged(get: Atom.FnContext | Atom.AtomContext
 function refreshCredentialDependents(get: Atom.FnContext | Atom.AtomContext, account: AccountId) {
   const inventory = AsyncResult.value(get.registry.get(overviewAtom));
   if (Option.isSome(inventory))
-    for (const link of inventory.value.links)
-      if (link.account === account) get.registry.refresh(toolsAtom({ app: link.app }));
+    for (const app of accountAppIds(inventory.value, account))
+      get.registry.refresh(toolsAtom({ app }));
 }
 
 /**

@@ -2,7 +2,7 @@ import { hydrated } from "@executor-js/ui/contracts/http";
 import { revalidated } from "@executor-js/ui/contracts/refresh";
 import { acknowledgeLinkChecks, refreshAppLinks } from "./app-accounts.ts";
 import { discoveryTarget, refreshAppDiscovery } from "./app-discovery.ts";
-import { linkedAccountIds } from "@executor-js/ui/contracts/app-accounts";
+import { appAccountIds } from "@executor-js/ui/contracts/app-accounts";
 import { acknowledgeResourceAccount, resourceDirectoryAtom } from "./resource-access.ts";
 import { protectedQuery } from "./protected-query.ts";
 /** Account queries remain independent across organizations, including OAuth returns. */
@@ -158,7 +158,7 @@ function refreshCredentialDependents(
   const inventory = AsyncResult.value(get(inventoryAtom(organization)));
   if (Option.isSome(inventory))
     for (const app of inventory.value.apps)
-      if (linkedAccountIds(inventory.value.links, app.id).includes(account)) {
+      if (appAccountIds(inventory.value, app.id).includes(account)) {
         refreshAppLinks(get, {
           organization,
           app: app.id,

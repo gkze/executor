@@ -33,7 +33,8 @@ export default defineApp({}, async ({ signal }) => ({
 
 MCP and GraphQL are optional peers. Subpath imports isolate their module graphs;
 optional peers keep unused libraries out of the dependency installation. Apps
-reach MCP servers over HTTP; they cannot start local processes.
+reach MCP servers over HTTP; they cannot start local processes. The local
+Executor server can run a stdio-only MCP server and serve it to an app over HTTP.
 
 `defineApp` declares behavior, not a name. Package identity lives in
 `package.json.name`; the host separately names each installed copy.

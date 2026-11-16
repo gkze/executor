@@ -33,11 +33,14 @@
     "@executor-js/sdk": "workspace:*",
     "@executor-js/telemetry": "workspace:*",
     "@executor-js/utils": "workspace:*",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "@napi-rs/keyring": "2.1.0",
     "apps": "workspace:*",
     "better-auth": "1.7.20",
     "effect": "4.1.4",
     "fumadb-effect": "workspace:*",
+    "mcp-proxy": "6.10.0",
     "proper-lockfile": "4.1.2"
   },
   "devDependencies": {

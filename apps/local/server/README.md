@@ -431,6 +431,34 @@ cooperative; they do not isolate arbitrary app code or bound process memory.
 App code can pass `context.signal` to fetch to observe cancellation. Effects
 already completed are not rolled back when an execution fails or is cancelled.
 
+## Stdio MCP servers
+
+Apps cannot start processes, so this server runs a stdio-only MCP server for
+one. `POST /v1/stdio-mcp-servers` with the local API key takes a `name`, a
+`command` and its `args` (run without a shell), an absolute `cwd`, plain `env`
+variables and `secrets`. It deploys an ordinary MCP app whose source names only
+the bridge URL, `http://127.0.0.1:<port>/stdio-mcp/<id>`, records the server in
+`local_stdio_mcp_servers`, and links the app to one account it provisions. That
+account holds a random bridge token and the secret variables; the server keeps
+only the token's SHA-256 and the secret names. Secret values must be printable
+ASCII without surrounding spaces, as they travel as header values. Adding a
+server runs a command on this machine, so the endpoint is not among the
+Executor app's tools.
+
+The bridge (`src/implementation/stdio-mcp.ts`) accepts a request only with the
+server's token. It also refuses a browser `Origin` and a `Host` other than this
+server's loopback address. One child serves every MCP session with the same
+secret values, using mcp-proxy's `proxyServer`, so apps that open a session per
+operation share it; at most four children run per server. Only an `initialize`
+starts a child. A child stops after five minutes without sessions or by exiting,
+and the next session starts a new one; a call the child was serving fails at
+once. A child's elicitation is sent on the response of the one tool call in
+progress on it, and declined otherwise. A child's environment is the MCP SDK's short default list,
+the proxy and CA variables, then the server's plain and secret variables; its
+stderr is discarded. The bridge URL names the port, so moving the server to
+another port means adding the server again. There is no dashboard or CLI
+command for this yet.
+
 ## Implemented
 
 - Deploy source, derive provider IDs and retain immutable versions.

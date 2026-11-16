@@ -11630,7 +11630,7 @@ export const scenarios = plan({
   localManagedAppLinksFixed: {
     file: "local-app-account-app-links.spec.ts",
     title:
-      "the local server's own Executor app keeps its managed account linked: unlinking, replacing or connecting its account through the dashboard or its tools is refused",
+      "the local server's own Executor app keeps its managed account linked and its code: unlinking, replacing or connecting its account, or deploying, committing or activating its code, through the dashboard, the API or its tools is refused",
     targets: {
       local: scheduled,
       "self-host": na("Only local manages its own Executor app and account."),

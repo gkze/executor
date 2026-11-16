@@ -9380,6 +9380,19 @@ export const scenarios = plan({
       cloud: scheduled,
     },
   },
+  hostedSharedAccountSetupPrompt: {
+    fixtures: "actors",
+    file: "shared-account-setup.spec.ts",
+    title:
+      "a manager who linked an account for everyone and none for themselves sees setup's first prompt name it",
+    targets: {
+      local: na(
+        "Local has no agent setup flow; its overview's app links are read in its own scenario.",
+      ),
+      "self-host": scheduled,
+      cloud: na("Cloud renders the same hosted setup pages and inventory as self-host."),
+    },
+  },
   hostedAppSchedulesBrowser: {
     fixtures: "actors",
     file: "app-accounts-tab.spec.ts",

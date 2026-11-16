@@ -27,6 +27,28 @@ export interface SharedAppLink {
 export const linkedAccountIds = (links: readonly AppAccountLink[], app: AppId) =>
   links.flatMap((link) => (link.app === app ? [link.account] : []));
 
+/** An inventory's links: the caller's own, and the app links shared by everyone using each app. */
+export interface InventoryLinks {
+  readonly links: readonly AppAccountLink[];
+  readonly appLinks: readonly SharedAppLink[];
+}
+
+/** The ids of the accounts linked to one app in either scope, each once, the caller's first. */
+export const appAccountIds = (inventory: InventoryLinks, app: AppId) => [
+  ...new Set([
+    ...linkedAccountIds(inventory.links, app),
+    ...linkedAccountIds(inventory.appLinks, app),
+  ]),
+];
+
+/** The ids of the apps an account is linked to in either scope, each once. */
+export const accountAppIds = (inventory: InventoryLinks, account: AccountId) =>
+  new Set(
+    [...inventory.links, ...inventory.appLinks].flatMap((link) =>
+      link.account === account ? [link.app] : [],
+    ),
+  );
+
 interface LinkedAccount {
   readonly id: AccountId;
   readonly provider: ProviderId;

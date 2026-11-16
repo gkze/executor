@@ -13,6 +13,7 @@ import { AsyncResult, type Atom } from "effect/reactivity";
 import type { ConnectedAgent } from "@executor-js/mcp-auth/agents";
 import type { GrantId } from "@executor-js/mcp-auth/grants";
 import type { AssistantId } from "@executor-js/ui/contracts/dashboard";
+import { appAccountIds } from "@executor-js/ui/contracts/app-accounts";
 import { executorCatalogPackage } from "@executor-js/hosted-server/catalog";
 import {
   AssistantChoices,
@@ -779,18 +780,15 @@ function PromptCopy({ prompt }: { readonly prompt: string | undefined }) {
 type Inventory = Atom.Success<ReturnType<typeof inventoryAtom>>;
 
 /**
- * Each app with the caller's linked accounts, by name, in the inventory's order. Executor's own
- * app is how the assistant reaches the others, so it is not one of them.
+ * Each app with the accounts it runs with that the caller may read, linked for them or for
+ * everyone, by name, in the inventory's order. Executor's own app is how the assistant reaches the
+ * others, so it is not one of them.
  */
 function connectedAccounts(inventory: Inventory) {
   const apps = inventory.apps.flatMap((app) => {
     if (app.copiedFrom?.name === executorCatalogPackage) return [];
-    const labels = inventory.links.flatMap((link) =>
-      link.app === app.id
-        ? inventory.accounts
-            .filter((account) => account.id === link.account)
-            .map((account) => account.label)
-        : [],
+    const labels = appAccountIds(inventory, app.id).flatMap((id) =>
+      inventory.accounts.filter((account) => account.id === id).map((account) => account.label),
     );
     return labels.length === 0 ? [] : [{ app: app.name, accounts: labels }];
   });

@@ -42,7 +42,7 @@ import {
 import { inventoryAtom } from "./organization.ts";
 import { accountAtom, acknowledgeAccount } from "./accounts.ts";
 import type { ToolCatalog } from "@executor-js/ui/contracts/dashboard";
-import { linkedAccountIds } from "@executor-js/ui/contracts/app-accounts";
+import { appAccountIds, linkedAccountIds } from "@executor-js/ui/contracts/app-accounts";
 
 /** App data is never reused between organizations. */
 class AppKey extends Data.Class<{
@@ -475,7 +475,7 @@ export function acknowledgeApp(
   const inventory = AsyncResult.value(get(inventoryAtom(organization)));
   get.refresh(toolsAtom({ organization, app: saved.id }));
   const accounts = new Set(
-    Option.isSome(inventory) ? linkedAccountIds(inventory.value.links, saved.id) : [],
+    Option.isSome(inventory) ? appAccountIds(inventory.value, saved.id) : [],
   );
   acknowledge(get, appAtom({ organization, app: saved.id }), () => saved);
   acknowledge(get, inventoryAtom(organization), (data) => ({

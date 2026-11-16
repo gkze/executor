@@ -85,6 +85,8 @@ export const oauthSetupIssuer = Effect.gen(function* () {
   let omitSecretExpiry = false;
   /** Vercel registers a public client whatever method the request names, as RFC 7591 allows. */
   let issuePublicClients = false;
+  /** A public client's `client_secret`: omitted, `""` as Ramp sends, or `null`. */
+  let publicClientSecret: "omitted" | "empty" | "null" = "omitted";
   let nonceRequested: boolean | undefined;
   let idTokenAlgorithms: readonly string[] | undefined;
   /**
@@ -954,7 +956,12 @@ export const oauthSetupIssuer = Effect.gen(function* () {
           {
             ...(malformedRegistration ? {} : { client_id: issued.clientId }),
             ...(issuePublicClients
-              ? { token_endpoint_auth_method: "none" }
+              ? {
+                  ...(publicClientSecret === "omitted"
+                    ? {}
+                    : { client_secret: publicClientSecret === "empty" ? "" : null }),
+                  token_endpoint_auth_method: "none",
+                }
               : {
                   client_secret: issued.clientSecret,
                   ...(omitSecretExpiry ? {} : { client_secret_expires_at: expiresAt }),
@@ -1024,6 +1031,8 @@ export const oauthSetupIssuer = Effect.gen(function* () {
       readonly omitSecretExpiry?: boolean;
       /** Register every client as public, replacing the requested token endpoint method. */
       readonly issuePublicClients?: boolean;
+      /** The `client_secret` a public client's registration answer carries. */
+      readonly publicClientSecret?: typeof publicClientSecret;
       /** Advertised ID token algorithms; null omits them from OAuth metadata. */
       readonly idTokenAlgorithms?: readonly string[] | null;
       /** Serve OpenID Connect Discovery with these ID token algorithms; null serves none. */
@@ -1143,6 +1152,7 @@ export const oauthSetupIssuer = Effect.gen(function* () {
           retryAfter = input.retryAfter === null ? undefined : input.retryAfter;
         if (input.omitSecretExpiry !== undefined) omitSecretExpiry = input.omitSecretExpiry;
         if (input.issuePublicClients !== undefined) issuePublicClients = input.issuePublicClients;
+        if (input.publicClientSecret !== undefined) publicClientSecret = input.publicClientSecret;
         if (input.registration !== undefined) registration = input.registration;
         if (input.expiresAt !== undefined) expiresAt = input.expiresAt;
         if (input.discovery !== undefined) discovery = input.discovery;
